@@ -31,3 +31,11 @@
 {{define "dialog-close"}}
 <button type="button" class="dialog-close" data-dialog-close aria-label="Close">×</button>
 {{end}}
+
+{{/* Which build is running: a fingerprint of board-console's source and when
+     the image was built — both stamped by the Dockerfile (see buildinfo.go). */}}
+{{define "footer"}}
+<footer class="site-footer">
+  Build <code>{{buildID}}</code>{{with buildDate}} · built <time datetime="{{iso .}}" data-local>{{.UTC.Format "02/01/2006 - 15:04:05"}} UTC</time>{{end}}
+</footer>
+{{end}}

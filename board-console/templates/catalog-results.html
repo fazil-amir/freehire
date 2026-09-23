@@ -1,5 +1,8 @@
 {{define "catalog-results"}}
 <table class="catalog-table">
+  <colgroup>
+    <col style="width: 22%"><col style="width: 15%"><col style="width: 13%"><col style="width: 22%"><col style="width: 22%"><col style="width: 60px">
+  </colgroup>
   <thead>
     <tr>
       <th>Provider</th>
@@ -12,7 +15,7 @@
   </thead>
   <tbody>
     {{range .Providers}}
-    <tr>
+    <tr {{if .Crawling}}data-running{{end}}>
       <td>{{.Provider}}</td>
       <td class="muted">{{.Kind}}</td>
       <td>
@@ -29,7 +32,8 @@
         {{else}}<span class="muted">—</span>{{end}}
       </td>
       <td>
-        {{if .LastRunAt.IsZero}}<span class="muted">never</span>
+        {{if .Crawling}}<span class="badge badge-running">crawling</span>
+        {{else if .LastRunAt.IsZero}}<span class="muted">never</span>
         {{else}}
           <span class="badge badge-{{.LastRunStatus}}">{{.LastRunStatus}}</span>
           <div class="cell-sub"><time datetime="{{iso .LastRunAt}}" data-local>{{.LastRunAt.UTC.Format "02/01/2006 - 15:04:05"}} UTC</time></div>
@@ -39,7 +43,7 @@
         <div class="kebab-wrap">
           <button type="button" class="kebab-btn" data-kebab-toggle aria-label="Actions for {{.Provider}}">⋮</button>
           <div class="kebab-menu" hidden>
-            <form method="post" action="/crawl" data-async
+            <form method="post" action="/crawl" data-async data-refresh
                   data-done="{{if .FullyAdded}}Crawl{{else}}Add + crawl{{end}} started for {{.Provider}}">
               <input type="hidden" name="provider" value="{{.Provider}}">
               <button type="submit" class="kebab-item">{{if .FullyAdded}}Crawl{{else}}Add + Crawl{{end}}</button>

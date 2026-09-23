@@ -78,6 +78,50 @@ function refreshLiveRegion() {
     });
 }
 
+// Click a .run-row (Activity, Schedules) to expand the .run-detail row
+// holding its output. Delegated, since tables are re-rendered in place;
+// clicks on the row's own controls (a toggle, a kebab) are theirs, not this.
+document.addEventListener("click", function (e) {
+  var row = e.target.closest(".run-row");
+  if (!row || e.target.closest("button, a, form, input, select")) return;
+  var detail = document.getElementById("detail-" + row.dataset.runId);
+  if (detail) detail.hidden = !detail.hidden;
+});
+
+// refreshLiveRegion, keeping every expanded .run-detail expanded.
+function refreshKeepingOpen() {
+  var open = Array.prototype.map.call(
+    document.querySelectorAll(".run-detail:not([hidden])"),
+    function (el) { return el.id; }
+  );
+  return refreshLiveRegion().then(function () {
+    open.forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.hidden = false;
+    });
+  });
+}
+
+// Keep a table live while something in it is running: every 3s while any
+// row carries [data-running], re-render it in place (expanded output kept
+// open). idleMs is the slower cadence used when nothing is running — 0 for
+// a table where nothing starts on its own (Catalog: a click refreshes it,
+// which restarts this loop through the refresh event); Schedules keeps a
+// slow idle refresh because the scheduler starts runs by itself.
+function keepLive(selector, idleMs) {
+  if (!document.querySelector(selector)) return;
+  var timer = null;
+  function next() {
+    clearTimeout(timer);
+    var ms = document.querySelector(selector + " [data-running]") ? 3000 : idleMs;
+    if (ms) timer = setTimeout(function () { refreshKeepingOpen().finally(next); }, ms);
+  }
+  document.addEventListener("liveregion:refreshed", next);
+  next();
+}
+keepLive("[data-schedules]", 15000);
+keepLive("#catalog-results", 0);
+
 // Any [data-dialog-close] (the header's ×, a Cancel button) closes its
 // dialog, as does a click on the backdrop — which lands on the <dialog>
 // element itself, outside its content box.
@@ -152,7 +196,9 @@ document.addEventListener("liveregion:refreshed", localizeTimes);
       .then(function (r) { return r.text(); })
       .then(function (html) {
         results.innerHTML = html;
-        localizeTimes();
+        // Same announcement as an in-place refresh: times get localized and
+        // a crawling row starts the live refresh (keepLive).
+        document.dispatchEvent(new Event("liveregion:refreshed"));
         history.replaceState(null, "", "/?" + params.toString());
       })
       .catch(function () { /* leave the current results showing */ });
@@ -446,14 +492,6 @@ function showScheduleError(dialog, message) {
 (function () {
   if (!document.getElementById("activity-table")) return;
 
-  // Delegated: the table's rows are replaced on every in-place refresh.
-  document.addEventListener("click", function (e) {
-    var row = e.target.closest(".run-row");
-    if (!row) return;
-    var detail = document.getElementById("detail-" + row.dataset.runId);
-    if (detail) detail.hidden = !detail.hidden;
-  });
-
   // The provider filter auto-submits (debounced) like the catalog search;
   // the status/action selects already submit on change (see the template).
   var filterForm = document.getElementById("activity-filters");
@@ -470,19 +508,6 @@ function showScheduleError(dialog, message) {
     var text = "stdout:\n" + run.stdout + "\n\nstderr:\n" + run.stderr;
     if (run.err) text += "\n\nerror: " + run.err;
     return text;
-  }
-
-  function refreshKeepingOpen() {
-    var open = Array.prototype.map.call(
-      document.querySelectorAll(".run-detail:not([hidden])"),
-      function (el) { return el.id; }
-    );
-    return refreshLiveRegion().then(function () {
-      open.forEach(function (id) {
-        var el = document.getElementById(id);
-        if (el) el.hidden = false;
-      });
-    });
   }
 
   var timer = null;

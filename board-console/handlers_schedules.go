@@ -26,7 +26,14 @@ type scheduleRow struct {
 	// kebab menu's Edit item to hand to openScheduleModal.
 	IntervalValue string
 	IntervalUnit  string
+	// The provider's most recent crawl (add-boards or ingest) from the
+	// activity log, scheduled or manual — the expandable output under the
+	// row. Nil when the log holds none.
+	LatestRun *Run
 }
+
+// Running reports whether this schedule's own run is in flight.
+func (r scheduleRow) Running() bool { return r.LastStatus == "running" }
 
 // scheduleModal is the shared add/edit schedule dialog's state — the
 // "schedule-modal" template, rendered by every page that can add or edit a
@@ -53,12 +60,24 @@ type schedulesPageData struct {
 }
 
 func buildSchedulesPageData(app *App, r *http.Request) schedulesPageData {
+	// List() is newest-first, so the first match per provider is its latest.
+	latest := map[string]*Run{}
+	for _, run := range app.activity.List() {
+		if run.Action != "ingest" && run.Action != "add-boards" {
+			continue
+		}
+		if _, ok := latest[run.Provider]; !ok {
+			latest[run.Provider] = run
+		}
+	}
+
 	var rows []scheduleRow
 	for _, s := range app.schedules.List() {
 		value, unit := splitInterval(s.IntervalSecs)
 		rows = append(rows, scheduleRow{
 			Schedule: s, NextRun: s.NextRun(), Interval: formatInterval(s.Interval()),
 			IntervalValue: value, IntervalUnit: unit,
+			LatestRun: latest[s.Provider],
 		})
 	}
 

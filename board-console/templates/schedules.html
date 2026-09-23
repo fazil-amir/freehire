@@ -14,8 +14,11 @@
 
   {{if .DBError}}<p class="banner-warning">{{.DBError}}</p>{{end}}
 
-  <div class="table-card" data-live-region>
+  <div class="table-card" data-live-region data-schedules>
     <table class="catalog-table">
+      <colgroup>
+        <col style="width: 17%"><col style="width: 12%"><col style="width: 19%"><col style="width: 21%"><col style="width: 13%"><col style="width: 10%"><col style="width: 60px">
+      </colgroup>
       <thead>
         <tr>
           <th>Provider</th>
@@ -29,18 +32,19 @@
       </thead>
       <tbody>
         {{range .Schedules}}
-        <tr>
+        <tr class="run-row" data-run-id="sched-{{.ID}}" {{if .Running}}data-running{{end}}>
           <td>{{.Provider}}</td>
           <td><span class="pill">every {{.Interval}}</span></td>
           <td>
             {{if not .Enabled}}<span class="badge badge-no">paused</span>
+            {{else if .Running}}<span class="muted">after this run</span>
             {{else if .NextRun.IsZero}}<span class="badge badge-running">due now</span>
             {{else}}<time datetime="{{iso .NextRun}}" data-local>{{.NextRun.UTC.Format "02/01/2006 - 15:04:05"}} UTC</time>{{end}}
           </td>
           <td>
             {{if .LastRun.IsZero}}<span class="muted">never</span>
             {{else}}
-              <span class="badge {{if eq .LastStatus "failed"}}badge-failed{{else}}badge-done{{end}}">{{.LastStatus}}</span>
+              <span class="badge {{if eq .LastStatus "running"}}badge-running{{else if eq .LastStatus "ok"}}badge-done{{else}}badge-failed{{end}}">{{.LastStatus}}</span>
               <div class="cell-sub"><time datetime="{{iso .LastRun}}" data-local>{{.LastRun.UTC.Format "02/01/2006 - 15:04:05"}} UTC</time></div>
             {{end}}
           </td>
@@ -72,6 +76,25 @@
             </div>
           </td>
         </tr>
+        <tr class="run-detail" id="detail-sched-{{.ID}}" hidden>
+          <td colspan="7">
+            {{with .LatestRun}}
+            <div class="run-detail-head">
+              Latest crawl of {{.Provider}}: <span class="pill pill-{{.Action}}">{{.Action}}</span>
+              <span class="badge badge-{{.Status}}">{{.Status}}</span>
+              <time datetime="{{iso .StartedAt}}" data-local>{{.StartedAt.UTC.Format "02/01/2006 - 15:04:05"}} UTC</time>
+              · {{.Duration}}
+            </div>
+            <pre class="run-output">stdout:
+{{.Stdout}}
+
+stderr:
+{{.Stderr}}
+{{if .Err}}
+error: {{.Err}}{{end}}</pre>
+            {{else}}<span class="muted">No crawl of this provider in the activity log yet.</span>{{end}}
+          </td>
+        </tr>
         {{else}}
         <tr><td colspan="7" class="muted">No schedules yet.</td></tr>
         {{end}}
@@ -81,6 +104,7 @@
 
   {{template "schedule-modal" .ScheduleModal}}
 </main>
+{{template "footer"}}
 <script src="/static/app.js"></script>
 </body>
 </html>

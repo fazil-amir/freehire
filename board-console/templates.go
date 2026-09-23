@@ -26,7 +26,14 @@ func LoadTemplates() *Templates {
 		"sub": func(a, b int) int { return a - b },
 		// iso is a <time datetime> value: the server runs in UTC, so app.js
 		// re-renders every <time data-local> in the viewer's own timezone.
-		"iso": func(t time.Time) string { return t.UTC().Format(time.RFC3339) },
+		"iso":     func(t time.Time) string { return t.UTC().Format(time.RFC3339) },
+		"buildID": func() string { return buildID },
+		"buildDate": func() *time.Time {
+			if t := buildDate(); !t.IsZero() {
+				return &t
+			}
+			return nil
+		},
 	}
 	t, err := template.New("").Funcs(funcs).ParseFS(templateFS, "templates/*.html")
 	if err != nil {

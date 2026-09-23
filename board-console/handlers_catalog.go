@@ -33,6 +33,11 @@ type ProviderSummary struct {
 
 	LastRunAt     time.Time
 	LastRunStatus RunStatus
+
+	// Crawling is true from the instant a crawl of this provider is claimed
+	// (Runner.Crawling) — before its first Activity row exists — so the row
+	// shows it the moment the click lands.
+	Crawling bool
 }
 
 func (p ProviderSummary) FullyAdded() bool { return p.AddedCount == p.CompanyCount }
@@ -275,6 +280,7 @@ func attachRunState(app *App, rows []ProviderSummary) {
 
 	for i := range rows {
 		d := &rows[i]
+		d.Crawling = app.runner.Crawling(d.Provider)
 		if s, ok := scheduleByProvider[d.Provider]; ok {
 			d.HasSchedule = true
 			d.ScheduleID = s.ID
@@ -337,16 +343,12 @@ func handleCrawl(app *App) http.HandlerFunc {
 			http.Error(w, "provider required", http.StatusBadRequest)
 			return
 		}
-		alreadyAdded := app.runner.FullyAdded(r.Context(), provider)
-
-		go func() {
-			if alreadyAdded {
-				_ = app.runner.RunSingleCrawl(provider)
-			} else {
-				_ = app.runner.RunAddAndCrawlOne(provider)
+		if !app.runner.StartCrawl(provider, true, nil) {
+			if isFetch(r) {
+				actionError(w, http.StatusConflict, provider+" is already being crawled — see Activity.")
+				return
 			}
-		}()
-
+		}
 		actionDone(w, r, "/")
 	}
 }
@@ -458,9 +460,9 @@ func handleNewProvider(app *App) http.HandlerFunc {
 		}
 
 		if form.CrawlNow {
-			go func() {
-				_ = app.runner.RunAddAndCrawlOne(form.Provider)
-			}()
+			// Already crawling (a click on its row a moment ago): that crawl
+			// covers the row just added, so there is nothing to start.
+			app.runner.StartCrawl(form.Provider, true, nil)
 		}
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 	}

@@ -44,7 +44,14 @@ WORKDIR /src
 COPY board-console/go.mod board-console/go.sum* ./
 RUN go mod download
 COPY board-console/ .
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/board-console .
+# Stamp the footer's build info (board-console/buildinfo.go): .git is not in
+# the build context, so the build ID is a fingerprint of board-console's own
+# source — data/ excluded, since that is runtime state, not code.
+RUN BUILD_ID="$(find . -type f -not -path './data/*' | sort | xargs sha256sum | sha256sum | cut -c1-8)" \
+ && BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+ && CGO_ENABLED=0 GOOS=linux go build \
+      -ldflags="-s -w -X main.buildID=${BUILD_ID} -X main.buildRaw=${BUILD_DATE}" \
+      -o /out/board-console .
 
 # --- board-console runtime stage: reuses the freehire binaries the `build` stage
 # above already compiled (bulk-add-boards, ingest, reindex, close-chronic-boards) rather than recompiling

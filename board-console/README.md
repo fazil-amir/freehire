@@ -183,9 +183,16 @@ and CSV/schedule management work regardless.
   fast, scoped to one provider, and (since it no longer writes to the CSV)
   nothing to race on.
 - **Schedules**: checked once a minute; the floor is 2 minutes and a
-  shorter value is rejected inline. A crawl can't overlap itself however
-  short the interval — the scheduler runs due schedules one at a time and
-  waits for each — so the floor only guards against typos. A schedule that has
+  shorter value is rejected inline. Each due schedule starts in its own
+  goroutine, so a slow crawl never delays another schedule, but a schedule
+  never overlaps ITSELF — while its run is in flight it is skipped, and if
+  the run outlasted its interval it starts again on the next tick. The
+  interval is measured from a run's START, which is stamped (status
+  `running`) the moment it begins; the Schedules page refreshes itself while
+  a run is in flight, and each row expands to its provider's latest crawl
+  output. A host that sleeps (a laptop) pauses all of this — the tick and
+  the 30-minute subprocess timeout alike — so a missed slot there is the
+  sleep, not the scheduler. A schedule that has
   never run is due on the very next tick — fixed a bug where it never
   became due at all, because "never run" resolved to a fresh `time.Now()`
   on every check, a moving target a fixed comparison could never catch up

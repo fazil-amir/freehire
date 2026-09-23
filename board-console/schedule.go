@@ -13,9 +13,9 @@ import (
 )
 
 // minScheduleInterval is a floor against typos, not against overlap: the
-// Scheduler runs due schedules one at a time and waits for each, so a crawl
-// that outlasts its own interval simply runs again on the next tick after
-// it finishes rather than stacking a second copy.
+// Scheduler never starts a schedule whose previous run is still in flight,
+// so a crawl that outlasts its own interval simply runs again on the next
+// tick after it finishes rather than stacking a second copy.
 const minScheduleInterval = 2 * time.Minute
 
 // Schedule is one recurring crawl job, persisted to schedule.json.
@@ -26,7 +26,7 @@ type Schedule struct {
 	ReindexAfter bool      `json:"reindex_after"`
 	Enabled      bool      `json:"enabled"`
 	LastRun      time.Time `json:"last_run,omitzero"`
-	LastStatus   string    `json:"last_status,omitempty"` // "ok" / "failed"
+	LastStatus   string    `json:"last_status,omitempty"` // "running" / "ok" / "failed" / "interrupted"
 }
 
 func (s Schedule) Interval() time.Duration {
@@ -88,6 +88,13 @@ func (s *ScheduleStore) load() error {
 	var schedules []Schedule
 	if err := json.Unmarshal(data, &schedules); err != nil {
 		return fmt.Errorf("parse %s: %w", s.path, err)
+	}
+	// "running" on disk means board-console stopped mid-run: the subprocess
+	// died with it, so the run did not finish.
+	for i := range schedules {
+		if schedules[i].LastStatus == "running" {
+			schedules[i].LastStatus = "interrupted"
+		}
 	}
 	s.schedules = schedules
 	return nil
@@ -223,12 +230,47 @@ func (s *ScheduleStore) Toggle(id string) error {
 	return s.save()
 }
 
-// recordRun stamps the result of a run for the given schedule and persists.
-func (s *ScheduleStore) recordRun(id string, ranAt time.Time, err error) {
+// markStarted stamps a run's START as the schedule's last run, with status
+// "running". The interval is measured from here — an every-15m schedule
+// fires 15 minutes after its previous run began, not after it ended.
+func (s *ScheduleStore) markStarted(id string, startedAt time.Time) {
 	s.mu.Lock()
 	for i := range s.schedules {
 		if s.schedules[i].ID == id {
-			s.schedules[i].LastRun = ranAt
+			s.schedules[i].LastRun = startedAt
+			s.schedules[i].LastStatus = "running"
+			break
+		}
+	}
+	s.mu.Unlock()
+	if err := s.save(); err != nil {
+		log.Printf("schedule store: persist run start: %v", err)
+	}
+}
+
+// restoreRun puts back a schedule's previous last-run stamp, undoing a
+// markStarted whose crawl never began.
+func (s *ScheduleStore) restoreRun(id string, lastRun time.Time, status string) {
+	s.mu.Lock()
+	for i := range s.schedules {
+		if s.schedules[i].ID == id {
+			s.schedules[i].LastRun = lastRun
+			s.schedules[i].LastStatus = status
+			break
+		}
+	}
+	s.mu.Unlock()
+	if err := s.save(); err != nil {
+		log.Printf("schedule store: persist restore: %v", err)
+	}
+}
+
+// recordRun stamps the result of a finished run and persists. LastRun is
+// left at the start markStarted recorded.
+func (s *ScheduleStore) recordRun(id string, err error) {
+	s.mu.Lock()
+	for i := range s.schedules {
+		if s.schedules[i].ID == id {
 			if err != nil {
 				s.schedules[i].LastStatus = "failed"
 			} else {
@@ -252,12 +294,14 @@ func randomID() (string, error) {
 }
 
 // Scheduler ticks once a minute: it starts the built-in daily dead-board
-// cleanup when its 03:00 slot is unserved (see cleanup.go), and runs any due
-// schedule through the
-// runner's batching rule, one schedule at a time within a single tick —
-// though a manual UI action for a DIFFERENT provider can now genuinely run
-// alongside it, up to the ingest concurrency limit (see runner.go); only
-// reindex stays fully serialized regardless of source.
+// cleanup when its 03:00 slot is unserved (see cleanup.go), and starts every
+// due schedule through Runner.StartCrawl.
+//
+// Each schedule runs in the background, so one slow crawl never holds up
+// another (the ingest semaphore bounds how many crawl at once). A schedule
+// never overlaps a crawl of its provider — its own previous run or a manual
+// one: while one is in flight it is skipped, and it starts on the first
+// tick after that crawl finishes.
 type Scheduler struct {
 	store  *ScheduleStore
 	runner *Runner
@@ -284,11 +328,16 @@ func (s *Scheduler) Run(stop <-chan struct{}) {
 }
 
 func (s *Scheduler) runDue() {
-	now := time.Now()
+	// Round(0) strips the monotonic reading, so every comparison below is on
+	// the wall clock. Go compares two times that BOTH carry one by the
+	// monotonic clock, which stops while the host sleeps — a LastRun stamped
+	// in-process before a 2-hour sleep would then look minutes old on wake,
+	// and the schedule would run late by the length of the sleep.
+	now := time.Now().Round(0)
 
-	// The built-in daily dead-board cleanup. Started in the background, so a
-	// long run never holds up the schedules below; if one is already running
-	// (a "Run now"), StartCleanup declines and a later tick tries again.
+	// The built-in daily dead-board cleanup. Started in the background; if
+	// one is already running (a "Run now"), StartCleanup declines and a
+	// later tick tries again.
 	if cleanupDue(s.runner.cleanup.State().LastRun, now) {
 		if s.runner.StartCleanup(true) {
 			log.Printf("scheduler: daily dead-board cleanup started")
@@ -296,14 +345,23 @@ func (s *Scheduler) runDue() {
 	}
 
 	for _, sch := range s.store.List() {
-		if !sch.Due(now) {
+		if !sch.Due(now) || s.runner.Crawling(sch.Provider) {
+			continue
+		}
+		s.store.markStarted(sch.ID, now)
+		id := sch.ID
+		started := s.runner.StartCrawl(sch.Provider, sch.ReindexAfter, func(err error) {
+			if err != nil {
+				log.Printf("scheduler: %s failed: %v", id, err)
+			}
+			s.store.recordRun(id, err)
+		})
+		if !started {
+			// A crawl of this provider began between the check and the claim:
+			// put the stamp back, and a later tick tries again.
+			s.store.restoreRun(sch.ID, sch.LastRun, sch.LastStatus)
 			continue
 		}
 		log.Printf("scheduler: running %s (provider=%s)", sch.ID, sch.Provider)
-		err := s.runner.RunBatch([]string{sch.Provider}, sch.ReindexAfter)
-		if err != nil {
-			log.Printf("scheduler: %s failed: %v", sch.ID, err)
-		}
-		s.store.recordRun(sch.ID, now, err)
 	}
 }

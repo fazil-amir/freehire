@@ -84,23 +84,26 @@
     </form>
     <div data-live-region>
     <table class="catalog-table" id="activity-table">
+      <colgroup>
+        <col style="width: 24%"><col style="width: 14%"><col style="width: 14%"><col style="width: 24%"><col style="width: 24%">
+      </colgroup>
       <thead>
         <tr>
-          <th>Started</th>
-          <th>Action</th>
           <th>Provider</th>
           <th>Status</th>
           <th>Duration</th>
+          <th>Action type</th>
+          <th>Started</th>
         </tr>
       </thead>
       <tbody>
         {{range .Runs}}
         <tr class="run-row" data-run-id="{{.ID}}">
-          <td><time datetime="{{iso .StartedAt}}" data-local>{{.StartedAt.UTC.Format "02/01/2006 - 15:04:05"}} UTC</time></td>
-          <td><span class="pill pill-{{.Action}}">{{.Action}}</span>{{if .Label}} <span class="pill">{{.Label}}</span>{{end}}</td>
           <td>{{if .Provider}}{{.Provider}}{{else}}<span class="muted">—</span>{{end}}</td>
           <td><span class="badge badge-{{.Status}} status-badge">{{.Status}}</span></td>
           <td class="duration-cell">{{.Duration}}</td>
+          <td><span class="pill pill-{{.Action}}">{{.Action}}</span>{{if .Label}} <span class="pill">{{.Label}}</span>{{end}}</td>
+          <td><time datetime="{{iso .StartedAt}}" data-local>{{.StartedAt.UTC.Format "02/01/2006 - 15:04:05"}} UTC</time></td>
         </tr>
         <tr class="run-detail" id="detail-{{.ID}}" hidden>
           <td colspan="5">
@@ -127,6 +130,7 @@ error: {{.Err}}{{end}}</pre>
     </div>
   </div>
 </main>
+{{template "footer"}}
 <script src="/static/app.js"></script>
 </body>
 </html>

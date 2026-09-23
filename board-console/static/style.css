@@ -341,7 +341,12 @@ input:disabled { color: var(--text-faint); cursor: not-allowed; }
 .search-form { display: flex; gap: 8px; margin-left: auto; }
 .search-form input[type="search"] { min-width: 240px; }
 
-table.catalog-table { width: 100%; border-collapse: collapse; }
+/* Fixed layout: column widths come from each table's <colgroup>, never from
+   its content — so expanding a run's output, a badge changing from
+   "running" to "done", or a live duration ticking over can't re-flow the
+   columns and jerk the table sideways. */
+table.catalog-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+table.catalog-table td { overflow-wrap: anywhere; }
 table.catalog-table th, table.catalog-table td {
   text-align: left;
   padding: 11px 16px;
@@ -613,8 +618,11 @@ code {
 
 /* --- activity --- */
 .run-row { cursor: pointer; }
+.run-detail-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; font-size: 13px; color: var(--text-muted); }
 .run-output {
+  margin: 0;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   background: var(--surface);
   color: var(--text);
   padding: 12px;
@@ -624,3 +632,13 @@ code {
   font-size: 12px;
   font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
 }
+
+/* --- footer --- */
+.site-footer {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 24px 32px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+.site-footer code { background: var(--surface-raised); color: var(--text-muted); }

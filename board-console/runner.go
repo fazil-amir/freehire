@@ -39,6 +39,9 @@ type Runner struct {
 	cleanup  *CleanupStore
 	bin      Binaries
 
+	crawlMu  sync.Mutex
+	crawling map[string]bool // providers with a crawl in flight — see claimCrawl
+
 	// cleanupMu admits one dead-board cleanup (Preview or real) at a time;
 	// a second request is refused rather than queued — see StartCleanup.
 	cleanupMu sync.Mutex
@@ -78,6 +81,7 @@ func NewRunner(csv *CSVStore, activity *ActivityLog, db *DBStore, cleanup *Clean
 		cleanup:   cleanup,
 		bin:       bin,
 		ingestSem: make(chan struct{}, maxConcurrentIngest),
+		crawling:  map[string]bool{},
 	}
 }
 
@@ -248,51 +252,87 @@ func (r *Runner) drainReindex() {
 	}
 }
 
-// RunSingleCrawl is the single-row "Crawl" action: ingest then queue a
-// reindex, for a provider that's already fully added.
-func (r *Runner) RunSingleCrawl(provider string) error {
-	err := r.runIngest(provider)
-	r.queueReindex()
-	return err
+// Crawling reports whether a crawl (add-boards and/or ingest) of provider
+// is in flight, from any caller.
+func (r *Runner) Crawling(provider string) bool {
+	r.crawlMu.Lock()
+	defer r.crawlMu.Unlock()
+	return r.crawling[provider]
 }
 
-// RunBatch is the shared batching rule used by a scheduled run (and, via
-// RunAddAndCrawlOne, the single-row "Add + Crawl" action): add (if not
-// already fully added) + ingest for each provider in order, then queue
-// ONE reindex at the end — only if reindexAfter is set. Concurrency across
-// SEPARATE calls to RunBatch/RunSingleCrawl (e.g. two different button
-// clicks) is what the ingest semaphore provides; within one call the
-// providers still run sequentially.
-func (r *Runner) RunBatch(providers []string, reindexAfter bool) error {
-	ctx := context.Background()
+// claimCrawl marks provider as crawling, reporting false if it already was.
+// One provider is never crawled twice at once, whoever asks — a click, a
+// schedule, a bulk run: a second copy would re-fetch the same boards,
+// double the load on the source, and race the first over the same rows.
+func (r *Runner) claimCrawl(provider string) bool {
+	r.crawlMu.Lock()
+	defer r.crawlMu.Unlock()
+	if r.crawling[provider] {
+		return false
+	}
+	r.crawling[provider] = true
+	return true
+}
 
+func (r *Runner) releaseCrawl(provider string) {
+	r.crawlMu.Lock()
+	defer r.crawlMu.Unlock()
+	delete(r.crawling, provider)
+}
+
+// crawlOne adds provider's boards when not every one is added yet, then
+// ingests it. The caller holds the provider's claim.
+func (r *Runner) crawlOne(provider string) error {
+	if !r.FullyAdded(context.Background(), provider) {
+		if err := r.runAdd(provider); err != nil {
+			return err
+		}
+	}
+	return r.runIngest(provider)
+}
+
+// StartCrawl is the one entry point for crawling a single provider — the
+// Crawl / Add + Crawl actions and every schedule. It claims the provider
+// before returning, then crawls in the background, queues a reindex after
+// when asked, and hands the result to done (which may be nil). It reports
+// false, starting nothing, when that provider is already being crawled.
+func (r *Runner) StartCrawl(provider string, reindexAfter bool, done func(error)) bool {
+	if !r.claimCrawl(provider) {
+		return false
+	}
+	go func() {
+		err := r.crawlOne(provider)
+		r.releaseCrawl(provider)
+		if reindexAfter {
+			r.queueReindex()
+		}
+		if done != nil {
+			done(err)
+		}
+	}()
+	return true
+}
+
+// RunBatch is "Add + Crawl Selected": each provider in order, then ONE
+// reindex at the end when reindexAfter is set. A provider already being
+// crawled elsewhere is skipped rather than crawled a second time alongside.
+func (r *Runner) RunBatch(providers []string, reindexAfter bool) error {
 	var firstErr error
 	for _, p := range providers {
-		if !r.FullyAdded(ctx, p) {
-			if err := r.runAdd(p); err != nil {
-				if firstErr == nil {
-					firstErr = err
-				}
-				continue // still attempt to crawl what we can of the rest
-			}
+		if !r.claimCrawl(p) {
+			log.Printf("batch: %s is already being crawled — skipped", p)
+			continue
 		}
-		if err := r.runIngest(p); err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
+		err := r.crawlOne(p)
+		r.releaseCrawl(p)
+		if err != nil && firstErr == nil {
+			firstErr = err
 		}
 	}
 	if reindexAfter {
 		r.queueReindex()
 	}
 	return firstErr
-}
-
-// RunAddAndCrawlOne is the single-row "Add + Crawl" action for a provider
-// not yet fully added — its own one-provider batch, always reindexing
-// after.
-func (r *Runner) RunAddAndCrawlOne(provider string) error {
-	return r.RunBatch([]string{provider}, true)
 }
 
 // StartCleanup runs freehire's close-chronic-boards in the background:
