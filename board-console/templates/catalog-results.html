@@ -1,0 +1,46 @@
+{{define "catalog-results"}}
+<table class="catalog-table">
+  <thead>
+    <tr>
+      <th>Provider</th>
+      <th>Kind</th>
+      <th>Companies</th>
+      <th>Added</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {{range .Providers}}
+    <tr {{if gt .AddedCount 0}}class="added-row"{{end}}>
+      <td>{{.Provider}}</td>
+      <td>{{.Kind}}</td>
+      <td>{{.AddedCount}} / {{.CompanyCount}}</td>
+      <td>
+        {{if .FullyAdded}}<span class="badge badge-yes">✅</span>
+        {{else if .PartiallyAdded}}<span class="badge badge-partial">◐ partial</span>
+        {{else}}<span class="badge badge-no">⚪</span>{{end}}
+      </td>
+      <td>
+        <form method="post" action="/crawl" class="inline-form" data-async
+              data-done="{{if .FullyAdded}}Crawl{{else}}Add + crawl{{end}} started for {{.Provider}}">
+          <input type="hidden" name="provider" value="{{.Provider}}">
+          <button type="submit" class="btn btn-secondary btn-sm">{{if .FullyAdded}}Crawl{{else}}Add + Crawl{{end}}</button>
+        </form>
+      </td>
+    </tr>
+    {{else}}
+    <tr><td colspan="5" class="muted">No providers match.</td></tr>
+    {{end}}
+  </tbody>
+</table>
+
+<div class="table-footer">
+  {{if gt .TotalPages 1}}
+  {{if gt .Page 1}}<a class="page-link" href="?kind={{.KindFilter}}&q={{.Query}}&page={{sub .Page 1}}">← Prev</a>{{end}}
+  <span class="muted">Page {{.Page}} / {{.TotalPages}} · {{.Total}} providers</span>
+  {{if lt .Page .TotalPages}}<a class="page-link" href="?kind={{.KindFilter}}&q={{.Query}}&page={{add .Page 1}}">Next →</a>{{end}}
+  {{else}}
+  <span class="muted">{{.Total}} providers</span>
+  {{end}}
+</div>
+{{end}}

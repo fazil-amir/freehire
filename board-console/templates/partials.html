@@ -1,0 +1,23 @@
+{{define "nav"}}
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">Board Management Console</div>
+    <nav>
+      <a href="/" class="{{if eq .Active "catalog"}}active{{end}}">Catalog</a>
+      <a href="/providers" class="{{if eq .Active "providers"}}active{{end}}">Providers</a>
+      <a href="/schedules" class="{{if eq .Active "schedules"}}active{{end}}">Schedules</a>
+      <a href="/activity" class="{{if eq .Active "activity"}}active{{end}}">Activity</a>
+    </nav>
+    <form method="post" action="/logout" class="logout-form">
+      <button type="submit">Log out</button>
+    </form>
+  </div>
+</header>
+{{end}}
+
+{{define "head"}}
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>board-console</title>
+<link rel="stylesheet" href="/static/style.css">
+{{end}}

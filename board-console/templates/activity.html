@@ -1,0 +1,71 @@
+{{define "activity"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+{{template "head" .}}
+</head>
+<body>
+{{template "nav" .}}
+<main>
+  <div class="page-header">
+    <h1>Activity</h1>
+  </div>
+
+  <div class="table-card">
+    <form method="get" action="/activity" class="toolbar" id="activity-filters">
+      <select name="status" onchange="this.form.submit()">
+        <option value="">All statuses</option>
+        <option value="running" {{if eq .StatusFilter "running"}}selected{{end}}>Running</option>
+        <option value="done" {{if eq .StatusFilter "done"}}selected{{end}}>Done</option>
+        <option value="failed" {{if eq .StatusFilter "failed"}}selected{{end}}>Failed</option>
+      </select>
+      <select name="action" onchange="this.form.submit()">
+        <option value="">All actions</option>
+        <option value="add-boards" {{if eq .ActionFilter "add-boards"}}selected{{end}}>add-boards</option>
+        <option value="ingest" {{if eq .ActionFilter "ingest"}}selected{{end}}>ingest</option>
+        <option value="reindex" {{if eq .ActionFilter "reindex"}}selected{{end}}>reindex</option>
+      </select>
+      <input type="search" name="provider" id="activity-provider-filter" value="{{.ProviderFilter}}"
+             placeholder="Filter by provider…" autocomplete="off">
+    </form>
+    <table class="catalog-table" id="activity-table">
+      <thead>
+        <tr>
+          <th>Started</th>
+          <th>Action</th>
+          <th>Provider</th>
+          <th>Status</th>
+          <th>Duration</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Runs}}
+        <tr class="run-row" data-run-id="{{.ID}}">
+          <td>{{.StartedAt.Format "2006-01-02 15:04:05"}}</td>
+          <td>{{.Action}}</td>
+          <td>{{.Provider}}</td>
+          <td><span class="badge badge-{{.Status}} status-badge">{{.Status}}</span></td>
+          <td class="duration-cell">{{.Duration}}</td>
+        </tr>
+        <tr class="run-detail" id="detail-{{.ID}}" hidden>
+          <td colspan="5">
+            <pre class="run-output">stdout:
+{{.Stdout}}
+
+stderr:
+{{.Stderr}}
+{{if .Err}}
+error: {{.Err}}{{end}}</pre>
+          </td>
+        </tr>
+        {{else}}
+        <tr><td colspan="5" class="muted">No runs yet.</td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>
+{{end}}

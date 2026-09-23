@@ -20,7 +20,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/hire ./cmd/server
  && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/ \
       ./cmd/ingest ./cmd/enrich ./cmd/reindex ./cmd/tg-ingest ./cmd/tg-extract \
       ./cmd/backfill-derive ./cmd/liveness ./cmd/notify ./cmd/import-collections \
-      ./cmd/recount-companies ./cmd/migrate
+      ./cmd/recount-companies ./cmd/migrate ./cmd/bulk-add-boards ./cmd/add-board
 
 # --- typst stage: fetch the pinned, statically-linked typst binary used to render CV
 # PDFs (internal/cv). The musl build is fully static, so it runs on distroless/static;
@@ -34,6 +34,34 @@ RUN apk add --no-cache curl xz \
  && tar -xJf /tmp/typst.tar.xz -C /tmp \
  && install -m 0755 /tmp/typst-x86_64-unknown-linux-musl/typst /usr/local/bin/typst \
  && /usr/local/bin/typst --version
+
+# --- board-console build stage: board-console is a separate Go module (its own
+# go.mod, zero imports of freehire's internal/... packages) that lives in this repo
+# purely so it comes up with `make up` like every other service — it has no
+# code-level relationship to freehire otherwise. ---
+FROM golang:1.26-alpine AS board-console-build
+WORKDIR /src
+COPY board-console/go.mod board-console/go.sum* ./
+RUN go mod download
+COPY board-console/ .
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/board-console .
+
+# --- board-console runtime stage: reuses the freehire binaries the `build` stage
+# above already compiled (bulk-add-boards, ingest, reindex) rather than recompiling
+# them — board-console runs them as local subprocesses inside its own container,
+# never via `docker exec` into the app container. ---
+FROM debian:stable-slim AS board-console
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates \
+ && rm -rf /var/lib/apt/lists/* \
+ && groupadd --system --gid 65532 nonroot \
+ && useradd --system --uid 65532 --gid nonroot --home-dir /app nonroot
+WORKDIR /app
+COPY --from=board-console-build /out/board-console /app/board-console
+COPY --from=build /out/ingest /out/reindex /out/bulk-add-boards /out/add-board /app/
+EXPOSE 8091
+USER nonroot:nonroot
+ENTRYPOINT ["/app/board-console"]
 
 # --- runtime stage ---
 # debian-slim (not distroless/static) because résumé text extraction shells out to

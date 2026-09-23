@@ -1,0 +1,79 @@
+{{define "schedules"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+{{template "head" .}}
+</head>
+<body>
+{{template "nav" .}}
+<main>
+  <div class="page-header">
+    <h1>Schedules</h1>
+    <button type="button" class="btn btn-primary" data-schedule-open>+ Add schedule</button>
+  </div>
+
+  {{if .DBError}}<p class="banner-warning">{{.DBError}}</p>{{end}}
+
+  <div class="table-card" data-live-region>
+    <table class="catalog-table">
+      <thead>
+        <tr>
+          <th>Provider</th>
+          <th>Interval</th>
+          <th>Next run</th>
+          <th>Last run</th>
+          <th>Reindex after</th>
+          <th class="col-toggle">Enabled</th>
+          <th class="col-actions"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Schedules}}
+        <tr>
+          <td>{{.Provider}}</td>
+          <td>{{.IntervalSecs}}s</td>
+          <td>{{if .NextRun.IsZero}}due now{{else}}{{.NextRun.Format "2006-01-02 15:04"}}{{end}}</td>
+          <td>
+            {{if .LastRun.IsZero}}never{{else}}{{.LastRun.Format "2006-01-02 15:04"}} ({{.LastStatus}}){{end}}
+          </td>
+          <td>{{if .ReindexAfter}}yes{{else}}no{{end}}</td>
+          <td class="col-toggle">
+            <form method="post" action="/schedules/toggle" class="inline-form">
+              <input type="hidden" name="id" value="{{.ID}}">
+              <button type="submit" class="toggle-switch {{if .Enabled}}on{{end}}"
+                      aria-label="{{if .Enabled}}Disable{{else}}Enable{{end}}">
+                <span class="toggle-knob"></span>
+              </button>
+            </form>
+          </td>
+          <td class="col-actions">
+            <div class="kebab-wrap">
+              <button type="button" class="kebab-btn" data-kebab-toggle aria-label="Actions for {{.Provider}}">⋮</button>
+              <div class="kebab-menu" hidden>
+                <a class="kebab-item" href="/schedules?open=edit&id={{.ID}}"
+                   data-schedule-open data-id="{{.ID}}" data-provider="{{.Provider}}"
+                   data-interval-value="{{.IntervalValue}}" data-interval-unit="{{.IntervalUnit}}"
+                   data-reindex-after="{{.ReindexAfter}}">Edit</a>
+                <form method="post" action="/schedules/delete" data-async data-refresh
+                      data-confirm="Delete the schedule for {{.Provider}}?"
+                      data-done="Schedule for {{.Provider}} deleted">
+                  <input type="hidden" name="id" value="{{.ID}}">
+                  <button type="submit" class="kebab-item danger">Delete</button>
+                </form>
+              </div>
+            </div>
+          </td>
+        </tr>
+        {{else}}
+        <tr><td colspan="7" class="muted">No schedules yet.</td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+
+  {{template "schedule-modal" .ScheduleModal}}
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>
+{{end}}

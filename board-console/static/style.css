@@ -1,0 +1,506 @@
+/* board-console's own palette — a deliberate departure from freehire's
+   brand green, since this is a distinct internal ops tool, not a skin of
+   the main app. Fixed dark theme only (no light-mode variant): a single,
+   consistent palette for an always-dark dashboard, not a light/dark
+   adaptive system. */
+:root {
+  --bg: #0b0e14;
+  --surface: #12151c;
+  --surface-raised: #191d27;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+
+  --text: #e6e8ef;
+  --text-muted: #9aa3b2;
+  --text-faint: #666f80;
+
+  --accent: #7c5cff;
+  --accent-hover: #8f72ff;
+  --accent-text: #ffffff;
+  --accent-muted: rgba(124, 92, 255, 0.15);
+
+  --success: #10b981;
+  --success-muted: rgba(16, 185, 129, 0.15);
+  --warning: #f59e0b;
+  --warning-muted: rgba(245, 158, 11, 0.15);
+  --danger: #ef4444;
+  --danger-muted: rgba(239, 68, 68, 0.15);
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.5);
+
+  /* Layering, one value per role, used by every instance of it: a dropdown
+     must clear any card/table stacking context, a toast clears dropdowns.
+     (A <dialog> opened with showModal() sits in the top layer above both.) */
+  --z-dropdown: 1000;
+  --z-toast: 1100;
+
+  --duration-fast: 150ms;
+  --duration-normal: 250ms;
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: inherit; }
+h1, h2 { font-weight: 600; }
+
+.muted { color: var(--text-muted); }
+
+/* --- top nav --- */
+.topbar {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.topbar-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  padding: 14px 24px;
+}
+.topbar .brand { font-weight: 600; color: var(--text); letter-spacing: -0.01em; }
+.topbar nav { display: flex; gap: 4px; flex: 1; }
+.topbar nav a {
+  color: var(--text-muted);
+  text-decoration: none;
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  font-weight: 500;
+  transition: color var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out);
+}
+.topbar nav a:hover { color: var(--text); background: var(--surface-raised); }
+.topbar nav a.active { color: var(--accent); background: var(--accent-muted); }
+.logout-form button {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  font: inherit;
+  transition: color var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out);
+}
+.logout-form button:hover { color: var(--text); background: var(--surface-raised); }
+
+main {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 32px 24px 48px;
+}
+
+/* --- login --- */
+.login-body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: var(--bg);
+  background-image: radial-gradient(circle at 15% 15%, var(--accent-muted), transparent 45%);
+}
+.login-form {
+  background: var(--surface);
+  color: var(--text);
+  padding: 48px;
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: 400px;
+}
+.login-form h1 { margin: 0 0 6px; font-size: 26px; }
+.login-form .subtitle { margin: -14px 0 4px; color: var(--text-muted); font-size: 14px; }
+.login-form label { font-size: 14px; gap: 8px; }
+.login-form input {
+  height: 44px;
+  font-size: 15px;
+  padding: 0 14px;
+}
+.login-form .btn { height: 44px; font-size: 15px; margin-top: 4px; }
+
+/* --- form primitives --- */
+label { display: flex; flex-direction: column; gap: 6px; font-weight: 500; font-size: 13px; }
+label.checkbox-label {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px;
+  font-weight: 400;
+  font-size: 14px;
+}
+
+.field-hint { font-size: 12px; font-weight: 400; color: var(--text-faint); }
+
+input, select {
+  font: inherit;
+  font-size: 14px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
+  height: 36px;
+  transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
+}
+input::placeholder { color: var(--text-faint); }
+input:focus-visible, select:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-muted);
+}
+input.input-invalid { border-color: var(--danger); }
+input:disabled { color: var(--text-faint); cursor: not-allowed; }
+
+.field-error, .field-error-inline {
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 400;
+}
+.field-error {
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--danger-muted);
+  border-radius: var(--radius-md);
+}
+.field-error-inline { display: block; margin-top: 2px; }
+
+/* A degraded-but-functional state (e.g. the DB unreachable, added status
+   showing a stale fallback) — distinct from .field-error, which means a
+   submission was rejected. */
+.banner-warning {
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  background: var(--warning-muted);
+  color: var(--warning);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+}
+
+/* --- buttons --- */
+.btn {
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  height: 36px;
+  padding: 0 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out);
+}
+.btn:disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
+.btn-sm { height: 32px; padding: 0 12px; font-size: 13px; }
+.btn-primary { background: var(--accent); color: var(--accent-text); }
+.btn-primary:hover:not(:disabled), .btn-primary:focus-visible:not(:disabled) {
+  background: var(--accent-hover);
+  box-shadow: 0 0 0 3px var(--accent-muted);
+}
+.btn-secondary { background: var(--surface-raised); color: var(--text); border-color: var(--border); }
+.btn-secondary:hover:not(:disabled) { border-color: var(--border-strong); }
+.btn-destructive { background: var(--danger); color: #fff; }
+.btn-destructive:hover:not(:disabled) { box-shadow: 0 0 0 3px var(--danger-muted); }
+
+/* --- page header --- */
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+.page-header h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
+
+/* --- card / table container --- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.table-card {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.tabs a {
+  color: var(--text-muted);
+  text-decoration: none;
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-weight: 500;
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+}
+.tabs a.active { background: var(--accent-muted); color: var(--accent); }
+.tabs a:hover:not(.active) { background: var(--surface-raised); color: var(--text); }
+
+.search-form { display: flex; gap: 8px; margin-left: auto; }
+.search-form input[type="search"] { min-width: 240px; }
+
+table.catalog-table { width: 100%; border-collapse: collapse; }
+table.catalog-table th, table.catalog-table td {
+  text-align: left;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--border);
+}
+table.catalog-table tbody tr:last-child td { border-bottom: none; }
+table.catalog-table thead th {
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--surface-raised);
+}
+table.catalog-table tbody tr {
+  transition: background var(--duration-fast) var(--ease-out);
+}
+table.catalog-table tbody tr:hover { background: var(--surface-raised); }
+/* box-shadow, not border-left: a <tr>'s own left border renders
+   inconsistently across browsers with border-collapse, an inset shadow
+   doesn't. */
+table.catalog-table tbody tr.added-row {
+  box-shadow: inset 3px 0 0 var(--success);
+  background: var(--success-muted);
+}
+table.catalog-table tbody tr.added-row:hover { background: var(--success-muted); }
+
+.badge {
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  line-height: 1.6;
+}
+.badge-done { background: var(--success-muted); color: var(--success); }
+.badge-failed { background: var(--danger-muted); color: var(--danger); }
+.badge-running { background: var(--warning-muted); color: var(--warning); }
+.badge-queued { background: var(--surface-raised); color: var(--text-muted); }
+.badge-yes { background: var(--success-muted); color: var(--success); }
+.badge-partial { background: var(--warning-muted); color: var(--warning); }
+.badge-no { background: var(--surface-raised); color: var(--text-muted); }
+
+.inline-form { display: inline; }
+
+.table-footer {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.page-link {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 500;
+}
+.page-link:hover { text-decoration: underline; }
+
+/* --- dialogs ---
+   --surface and --bg sit close in lightness, so fill color alone doesn't
+   separate the dialog from the page behind it — a stronger border plus
+   elevation shadow does the work color can't, on top of a darker/blurred
+   backdrop. Dialogs use --surface-raised, one step up from the page's
+   --surface cards, per the "modal, dropdown, hover state" surface. */
+dialog {
+  background: var(--surface-raised);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 24px;
+  width: 640px;
+  max-width: calc(100vw - 32px);
+  opacity: 0;
+  transform: translateY(4px) scale(0.98);
+  transition: opacity var(--duration-normal) var(--ease-out), transform var(--duration-normal) var(--ease-out), overlay var(--duration-normal) var(--ease-out) allow-discrete, display var(--duration-normal) var(--ease-out) allow-discrete;
+}
+dialog[open] { opacity: 1; transform: translateY(0) scale(1); }
+@starting-style {
+  dialog[open] { opacity: 0; transform: translateY(4px) scale(0.98); }
+}
+dialog::backdrop {
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(2px);
+  opacity: 0;
+  transition: opacity var(--duration-normal) var(--ease-out) allow-discrete;
+}
+dialog[open]::backdrop { opacity: 1; }
+@starting-style {
+  dialog[open]::backdrop { opacity: 0; }
+}
+dialog h2 { margin: 0 0 4px; font-size: 16px; }
+dialog form { display: flex; flex-direction: column; gap: 16px; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+/* Dialog inputs sit on --surface-raised (the dialog's own background), so
+   give them the page's --surface fill instead — otherwise they'd blend
+   into the dialog the same way the dialog blends into the page. */
+dialog input, dialog select { background: var(--surface); }
+
+.new-provider-help { font-size: 12px; margin: 2px 0; color: var(--text-muted); }
+ol.new-provider-help { padding-left: 18px; }
+ol.new-provider-help li { margin-bottom: 2px; }
+code {
+  background: var(--surface);
+  color: var(--text);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+/* --- kebab menu (Providers/Schedules row actions) --- */
+.col-actions { text-align: right; width: 60px; }
+.kebab-wrap { position: relative; display: inline-block; }
+.kebab-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 18px;
+  line-height: 1;
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+}
+.kebab-btn:hover { background: var(--surface-raised); color: var(--text); }
+/* position: fixed, placed at the button by app.js — absolute would be
+   clipped by .table-card's overflow: hidden in a short table. */
+.kebab-menu {
+  position: fixed;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  min-width: 190px;
+  padding: 4px;
+  z-index: var(--z-dropdown);
+  text-align: left;
+}
+.kebab-menu[hidden] { display: none; }
+.kebab-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-decoration: none;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+.kebab-item:hover { background: var(--surface); }
+.kebab-item.danger { color: var(--danger); }
+
+/* --- toasts (background-action confirmations) --- */
+#toast-stack {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  pointer-events: none;
+}
+.toast {
+  background: var(--surface-raised);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--success);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  padding: 10px 14px;
+  font-size: 13px;
+  max-width: min(420px, calc(100vw - 32px));
+  transition: opacity var(--duration-normal) var(--ease-out), transform var(--duration-normal) var(--ease-out);
+}
+.toast-error { border-left-color: var(--danger); }
+.toast-hide { opacity: 0; transform: translateY(4px); }
+
+/* --- schedules --- */
+.interval-row { display: flex; gap: 8px; }
+.col-toggle { text-align: right; width: 70px; }
+
+.toggle-switch {
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  border: none;
+  background: var(--surface-raised);
+  padding: 2px;
+  cursor: pointer;
+  position: relative;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+.toggle-switch .toggle-knob {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text);
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+.toggle-switch.on { background: var(--accent); }
+.toggle-switch.on .toggle-knob { background: var(--accent-text); transform: translateX(16px); }
+
+/* --- activity --- */
+.run-row { cursor: pointer; }
+.run-output {
+  white-space: pre-wrap;
+  background: var(--surface);
+  color: var(--text);
+  padding: 12px;
+  border-radius: var(--radius-md);
+  max-height: 400px;
+  overflow: auto;
+  font-size: 12px;
+  font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+}
