@@ -50,7 +50,7 @@ to ignore if it's ever run directly against this file.
 **Added status is read live from Postgres, not the CSV.** A CSV `added`
 column can't stay in sync across separate dev/prod databases that might
 each run their own board-console against the same repo checkout, so
-Catalog/Providers/Schedules all read it fresh instead:
+Catalog and Schedules both read it fresh instead:
 ```sql
 SELECT provider, board, status, count(*)
 FROM boards WHERE status IN ('active', 'pending')
@@ -182,9 +182,10 @@ and CSV/schedule management work regardless.
   or by the caller waiting for it. `add-boards` has no limit of its own —
   fast, scoped to one provider, and (since it no longer writes to the CSV)
   nothing to race on.
-- **Schedules**: checked once a minute; the floor is 15 minutes and a
-  shorter value is rejected inline, since a slow crawl (Greenhouse-sized)
-  can outlast a short interval and overlap itself. A schedule that has
+- **Schedules**: checked once a minute; the floor is 2 minutes and a
+  shorter value is rejected inline. A crawl can't overlap itself however
+  short the interval — the scheduler runs due schedules one at a time and
+  waits for each — so the floor only guards against typos. A schedule that has
   never run is due on the very next tick — fixed a bug where it never
   became due at all, because "never run" resolved to a fresh `time.Now()`
   on every check, a moving target a fixed comparison could never catch up
@@ -195,14 +196,16 @@ and CSV/schedule management work regardless.
   still-running command's output). Survives a restart.
 - **Live logs**: a run's stdout/stderr streams into the Activity page while
   it's still going — expand a row to watch it grow, polled every 2s.
-- **Activity filters**: status/action/provider, as query params on
-  `/activity` — the live-poll endpoint carries the same filters, so a
-  filtered view keeps patching in place instead of reloading on every tick.
-- **Providers tab**: a read-only join of the three stores — which
-  providers are currently added (and how fully), their schedule if any
-  (interval, next run, enabled/disabled), and their most recent activity
-  run. Only shows providers with at least one added row; the full catalog,
-  including never-added providers, stays on Catalog.
+- **Activity filters and pages**: status/action/provider and `page` (25
+  runs a page), as query params on `/activity` — the live-poll endpoint
+  carries the same ones, so a filtered page keeps patching in place. When
+  the set of runs on the page changes, the table re-renders in place with
+  expanded rows kept open. A "Reindex now" button sits in the header.
+- **Catalog is also the providers view**: each row joins the three stores —
+  how fully the provider is added, its schedule if any (interval, next
+  run, paused), and its most recent activity run. The "Added" switch
+  (`?show=added`) narrows it to providers with at least one added board,
+  which is what the old Providers page showed; `/providers` redirects there.
 - **Search**: multi-word, order-independent — every word must appear
   somewhere across the provider and company text, so "green house" matches
   "Greenhouse" as readily as "greenhouse" does.
@@ -214,11 +217,11 @@ and CSV/schedule management work regardless.
 - **Schedules support edit and delete, not just add** — one modal handles
   both (`POST /schedules/save`, branching on a hidden `id` field: empty
   creates, set updates the existing entry in place), reachable either from
-  the Schedules page's own kebab menu or from Providers'. `POST
+  the Schedules page's own kebab menu or from Catalog's. `POST
   /schedules/delete` removes one; the confirmation is a plain
-  `onsubmit="return confirm(...)"`, no custom dialog needed for something
-  reversible by re-adding.
-- **Providers' row actions are a kebab (⋮) menu**, not separate buttons:
+  `confirm()` (the form's `data-confirm`), no custom dialog needed for
+  something reversible by re-adding.
+- **Catalog's row actions are a kebab (⋮) menu**, not separate buttons:
   Crawl/Add+Crawl, Reindex now, and Add/Edit/Delete schedule (whichever
   apply). One delegated click listener (`app.js`) opens/closes every
   menu on the page — clicking a toggle opens its own menu and closes every

@@ -12,7 +12,11 @@ import (
 	"time"
 )
 
-const minScheduleInterval = 15 * time.Minute
+// minScheduleInterval is a floor against typos, not against overlap: the
+// Scheduler runs due schedules one at a time and waits for each, so a crawl
+// that outlasts its own interval simply runs again on the next tick after
+// it finishes rather than stacking a second copy.
+const minScheduleInterval = 2 * time.Minute
 
 // Schedule is one recurring crawl job, persisted to schedule.json.
 type Schedule struct {
@@ -124,10 +128,10 @@ func (s *ScheduleStore) List() []Schedule {
 }
 
 // Add validates and appends a new schedule. Returns an error the form can
-// show inline if the interval is below the 15-minute floor.
+// show inline if the interval is below minScheduleInterval.
 func (s *ScheduleStore) Add(provider string, interval time.Duration, reindexAfter bool) error {
 	if interval < minScheduleInterval {
-		return fmt.Errorf("interval must be at least %s (a slow crawl can outlast a shorter one and overlap itself)", minScheduleInterval)
+		return fmt.Errorf("interval must be at least %s", minScheduleInterval)
 	}
 	id, err := randomID()
 	if err != nil {
@@ -163,7 +167,7 @@ func (s *ScheduleStore) Get(id string) (Schedule, bool) {
 // it.
 func (s *ScheduleStore) Update(id, provider string, interval time.Duration, reindexAfter bool) error {
 	if interval < minScheduleInterval {
-		return fmt.Errorf("interval must be at least %s (a slow crawl can outlast a shorter one and overlap itself)", minScheduleInterval)
+		return fmt.Errorf("interval must be at least %s", minScheduleInterval)
 	}
 	s.mu.Lock()
 	found := false
@@ -247,7 +251,9 @@ func randomID() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// Scheduler ticks once a minute and runs any due schedule through the
+// Scheduler ticks once a minute: it starts the built-in daily dead-board
+// cleanup when its 03:00 slot is unserved (see cleanup.go), and runs any due
+// schedule through the
 // runner's batching rule, one schedule at a time within a single tick —
 // though a manual UI action for a DIFFERENT provider can now genuinely run
 // alongside it, up to the ingest concurrency limit (see runner.go); only
@@ -279,6 +285,16 @@ func (s *Scheduler) Run(stop <-chan struct{}) {
 
 func (s *Scheduler) runDue() {
 	now := time.Now()
+
+	// The built-in daily dead-board cleanup. Started in the background, so a
+	// long run never holds up the schedules below; if one is already running
+	// (a "Run now"), StartCleanup declines and a later tick tries again.
+	if cleanupDue(s.runner.cleanup.State().LastRun, now) {
+		if s.runner.StartCleanup(true) {
+			log.Printf("scheduler: daily dead-board cleanup started")
+		}
+	}
+
 	for _, sch := range s.store.List() {
 		if !sch.Due(now) {
 			continue

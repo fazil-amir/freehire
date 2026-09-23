@@ -20,7 +20,8 @@ type addScheduleForm struct {
 
 type scheduleRow struct {
 	Schedule
-	NextRun time.Time
+	NextRun  time.Time
+	Interval string // "15m"/"6h", see formatInterval
 	// The interval split back into the modal's value+unit fields, for the
 	// kebab menu's Edit item to hand to openScheduleModal.
 	IntervalValue string
@@ -29,7 +30,7 @@ type scheduleRow struct {
 
 // scheduleModal is the shared add/edit schedule dialog's state — the
 // "schedule-modal" template, rendered by every page that can add or edit a
-// schedule (Schedules and Providers), each passing its own provider list.
+// schedule (Schedules and Catalog), each passing its own provider list.
 type scheduleModal struct {
 	Form      addScheduleForm
 	Error     string
@@ -55,7 +56,10 @@ func buildSchedulesPageData(app *App, r *http.Request) schedulesPageData {
 	var rows []scheduleRow
 	for _, s := range app.schedules.List() {
 		value, unit := splitInterval(s.IntervalSecs)
-		rows = append(rows, scheduleRow{Schedule: s, NextRun: s.NextRun(), IntervalValue: value, IntervalUnit: unit})
+		rows = append(rows, scheduleRow{
+			Schedule: s, NextRun: s.NextRun(), Interval: formatInterval(s.Interval()),
+			IntervalValue: value, IntervalUnit: unit,
+		})
 	}
 
 	addedCounts, dbError := resolveAddedCounts(r.Context(), app)
@@ -176,7 +180,7 @@ func handleScheduleSave(app *App) http.HandlerFunc {
 		case convErr != nil || value <= 0:
 			errMsg = "Enter a valid interval."
 		case interval < minScheduleInterval:
-			errMsg = "Interval must be at least 15 minutes — a slow crawl can outlast a shorter one and overlap itself."
+			errMsg = "Interval must be at least 2 minutes."
 		}
 		if errMsg == "" {
 			var err error
@@ -192,7 +196,7 @@ func handleScheduleSave(app *App) http.HandlerFunc {
 
 		if errMsg != "" {
 			if isFetch(r) {
-				actionError(w, errMsg)
+				actionError(w, http.StatusUnprocessableEntity, errMsg)
 				return
 			}
 			data := buildSchedulesPageData(app, r)

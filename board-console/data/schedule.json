@@ -1,1 +1,11 @@
-[]
+[
+  {
+    "id": "cb6d9b258088903e",
+    "provider": "jobdanmark",
+    "interval_seconds": 900,
+    "reindex_after": true,
+    "enabled": true,
+    "last_run": "2026-09-23T15:35:22.001551052Z",
+    "last_status": "ok"
+  }
+]

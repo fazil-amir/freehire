@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os/exec"
 	"sync"
 	"time"
@@ -35,7 +36,12 @@ type Runner struct {
 	csv      *CSVStore
 	activity *ActivityLog
 	db       *DBStore // read-only; nil falls back to the CSV's frozen added column
+	cleanup  *CleanupStore
 	bin      Binaries
+
+	// cleanupMu admits one dead-board cleanup (Preview or real) at a time;
+	// a second request is refused rather than queued — see StartCleanup.
+	cleanupMu sync.Mutex
 
 	ingestSem chan struct{} // buffered to maxConcurrentIngest
 
@@ -47,44 +53,42 @@ type Runner struct {
 // Binaries holds the paths to the freehire worker binaries, overridable for
 // local (non-container) testing.
 type Binaries struct {
-	BulkAddBoards string
-	Ingest        string
-	Reindex       string
-	CSVPath       string
+	BulkAddBoards      string
+	Ingest             string
+	Reindex            string
+	CloseChronicBoards string
+	CSVPath            string
 }
 
 func DefaultBinaries() Binaries {
 	return Binaries{
-		BulkAddBoards: "/app/bulk-add-boards",
-		Ingest:        "/app/ingest",
-		Reindex:       "/app/reindex",
-		CSVPath:       "/app/data/combined_boards.csv",
+		BulkAddBoards:      "/app/bulk-add-boards",
+		Ingest:             "/app/ingest",
+		Reindex:            "/app/reindex",
+		CloseChronicBoards: "/app/close-chronic-boards",
+		CSVPath:            "/app/data/combined_boards.csv",
 	}
 }
 
-func NewRunner(csv *CSVStore, activity *ActivityLog, db *DBStore, bin Binaries) *Runner {
+func NewRunner(csv *CSVStore, activity *ActivityLog, db *DBStore, cleanup *CleanupStore, bin Binaries) *Runner {
 	return &Runner{
 		csv:       csv,
 		activity:  activity,
 		db:        db,
+		cleanup:   cleanup,
 		bin:       bin,
 		ingestSem: make(chan struct{}, maxConcurrentIngest),
 	}
 }
 
-// FullyAdded reports whether every one of a provider's CSV candidate rows
-// is already added — read from Postgres (the live, correct answer) when
+// FullyAdded reports whether every one of a provider's CSV candidate boards
+// (distinct by boardKey, not by row) is already added — read from Postgres (the live, correct answer) when
 // reachable, falling back to the CSV's own frozen `added` column
 // otherwise. Used to decide whether a Crawl action needs an add-boards
 // step first; a false positive here just means an extra, idempotent
 // add-boards call, never a skipped one.
 func (r *Runner) FullyAdded(ctx context.Context, provider string) bool {
-	total := 0
-	for _, row := range r.csv.Rows() {
-		if row.Provider == provider {
-			total++
-		}
-	}
+	total := boardCounts(r.csv.Rows())[provider]
 	if total == 0 {
 		return false
 	}
@@ -289,4 +293,44 @@ func (r *Runner) RunBatch(providers []string, reindexAfter bool) error {
 // after.
 func (r *Runner) RunAddAndCrawlOne(provider string) error {
 	return r.RunBatch([]string{provider}, true)
+}
+
+// StartCleanup runs freehire's close-chronic-boards in the background:
+// apply=false is Preview (report only, changes nothing); apply=true closes
+// the jobs of boards unreachable for 60 days AND of boards whose feed has
+// been empty for 30 — freehire arms those two passes with separate flags,
+// so both are passed — then queues a reindex through the coalesced path.
+// A real run is recorded in cleanup.json, which is what the daily slot is
+// measured against; a Preview is not.
+//
+// It reports false, starting nothing, when a cleanup is already running:
+// the command is idempotent, so a second copy could only repeat the first.
+func (r *Runner) StartCleanup(apply bool) bool {
+	if !r.cleanupMu.TryLock() {
+		return false
+	}
+	go func() {
+		defer r.cleanupMu.Unlock()
+		startedAt := time.Now()
+		var err error
+		if apply {
+			run := r.activity.Start("close-chronic-boards", "")
+			err = r.runSubprocess(run, r.bin.CloseChronicBoards, "--apply", "--apply-empty-feed")
+		} else {
+			run := r.activity.StartLabeled("close-chronic-boards", "", "dry run")
+			err = r.runSubprocess(run, r.bin.CloseChronicBoards)
+		}
+		if !apply {
+			return
+		}
+		status := StatusDone
+		if err != nil {
+			status = StatusFailed
+		}
+		if recErr := r.cleanup.Record(startedAt, status); recErr != nil {
+			log.Printf("cleanup: record run: %v", recErr)
+		}
+		r.queueReindex()
+	}()
+	return true
 }

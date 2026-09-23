@@ -15,10 +15,16 @@
   {{if .DBError}}<p class="banner-warning">{{.DBError}}</p>{{end}}
 
   <div class="table-card">
-    <div class="toolbar">
+    <div class="toolbar toolbar-split">
+      <div class="segmented" role="group" aria-label="Show">
+        <a href="/?kind={{.KindFilter}}{{if .Query}}&q={{.Query}}{{end}}"
+           class="{{if not .AddedOnly}}active{{end}}">All</a>
+        <a href="/?kind={{.KindFilter}}{{if .Query}}&q={{.Query}}{{end}}&show=added"
+           class="{{if .AddedOnly}}active{{end}}">Added</a>
+      </div>
       <div class="tabs">
         {{range .KindTabs}}
-        <a href="/?kind={{.Value}}{{if $.Query}}&q={{$.Query}}{{end}}"
+        <a href="/?kind={{.Value}}{{if $.Query}}&q={{$.Query}}{{end}}{{if $.AddedOnly}}&show=added{{end}}"
            class="{{if eq .Value $.KindFilter}}active{{end}}">{{.Label}}</a>
         {{end}}
       </div>
@@ -28,69 +34,82 @@
            as a plain GET, for progressive enhancement. -->
       <form method="get" action="/" class="search-form">
         <input type="hidden" name="kind" id="search-kind" value="{{.KindFilter}}">
+        {{if .AddedOnly}}<input type="hidden" name="show" id="search-show" value="added">{{end}}
         <input type="search" name="q" id="search-input" value="{{.Query}}"
                placeholder="Search provider or company…" autocomplete="off">
       </form>
     </div>
 
-    <div id="catalog-results">
+    <div id="catalog-results" data-live-region>
       {{template "catalog-results" .}}
     </div>
   </div>
 
   <dialog id="new-provider-dialog" {{if .OpenNewProviderModal}}data-open-on-load="true"{{end}}>
     <form method="post" action="/new-provider" novalidate>
-      <h2>New provider row</h2>
-      {{if .NewProviderError}}<p class="field-error">{{.NewProviderError}}</p>{{end}}
+      <div class="dialog-header">
+        <div>
+          <h2>New provider</h2>
+          <p class="dialog-subtitle">Add a board to the catalog, and optionally crawl it right away.</p>
+        </div>
+        {{template "dialog-close"}}
+      </div>
 
-      <label>Kind
-        <select id="new-provider-kind">
-          {{range .NewProviderKinds}}
-          {{/* Defaults to ATS platform when no kind was submitted (a fresh
-               open, not a reopen-after-error) — its two required fields
-               show immediately rather than waiting for a re-selection. */}}
-          <option value="{{.}}" {{if or (eq . $.NewProviderForm.Kind) (and (not $.NewProviderForm.Kind) (eq . "ATS platform"))}}selected{{end}}>{{.}}</option>
-          {{end}}
-        </select>
-      </label>
-      <label>Provider
-        <input type="text" name="provider" id="new-provider-input" list="new-provider-datalist"
-               value="{{.NewProviderForm.Provider}}"
-               placeholder="Type to search providers…" required autocomplete="off">
-        <datalist id="new-provider-datalist"></datalist>
-      </label>
-      <label id="field-board">Board
-        <input type="text" name="board" id="new-provider-board" value="{{.NewProviderForm.Board}}">
-        <span class="field-hint">The board/company ID from freehire's adapter for this provider — required for an ATS platform, since one ATS hosts many boards.</span>
-      </label>
-      <label id="field-company">Company
-        <input type="text" name="company" id="new-provider-company" value="{{.NewProviderForm.Company}}">
-        <span class="field-hint">The employer's display name.</span>
-      </label>
-      <label id="field-crawl-now" class="checkbox-label">
-        <input type="checkbox" name="crawl_now" {{if .NewProviderForm.CrawlNow}}checked{{end}}> Also crawl immediately after adding
-      </label>
+      <div class="dialog-body">
+        {{if .NewProviderError}}<p class="field-error">{{.NewProviderError}}</p>{{end}}
 
-      <p class="new-provider-help">
-        Provider not listed? That means freehire has no adapter for it yet.
-        To add a brand-new provider (e.g. a new ATS like InstaHire):
-      </p>
-      <ol class="new-provider-help">
-        <li>Write and merge the Go adapter in <code>internal/ingest/sources/</code></li>
-        <li>Rebuild the stack: <code>make up --build</code></li>
-        <li>Add one row for it to <code>board-console/data/combined_boards.csv</code>
-          (provider, board, company columns)</li>
-        <li>Optionally add it to <code>providerKind</code> in <code>providerkind.go</code>,
-          or it'll show under the "Unclassified" tab</li>
-      </ol>
-      <p class="new-provider-help">It'll then appear in this dropdown.</p>
+        <div class="field-grid">
+          <label>Kind
+            <select id="new-provider-kind">
+              {{range .NewProviderKinds}}
+              {{/* Defaults to ATS platform when no kind was submitted (a fresh
+                   open, not a reopen-after-error) — its two required fields
+                   show immediately rather than waiting for a re-selection. */}}
+              <option value="{{.}}" {{if or (eq . $.NewProviderForm.Kind) (and (not $.NewProviderForm.Kind) (eq . "ATS platform"))}}selected{{end}}>{{.}}</option>
+              {{end}}
+            </select>
+          </label>
+          <label>Provider
+            <input type="text" name="provider" id="new-provider-input" list="new-provider-datalist"
+                   value="{{.NewProviderForm.Provider}}"
+                   placeholder="Type to search providers…" required autocomplete="off">
+            <datalist id="new-provider-datalist"></datalist>
+          </label>
+          <label id="field-board">Board
+            <input type="text" name="board" id="new-provider-board" value="{{.NewProviderForm.Board}}">
+            <span class="field-hint">The board ID from freehire's adapter — one ATS hosts many boards.</span>
+          </label>
+          <label id="field-company">Company
+            <input type="text" name="company" id="new-provider-company" value="{{.NewProviderForm.Company}}">
+            <span class="field-hint">The employer's display name.</span>
+          </label>
+        </div>
+        <label id="field-crawl-now" class="checkbox-label">
+          <input type="checkbox" name="crawl_now" {{if .NewProviderForm.CrawlNow}}checked{{end}}> Crawl immediately after adding
+        </label>
+
+        <details class="dialog-help">
+          <summary>Provider not listed?</summary>
+          <p>freehire has no adapter for it yet. To add a brand-new provider:</p>
+          <ol>
+            <li>Write and merge the Go adapter in <code>internal/ingest/sources/</code></li>
+            <li>Rebuild the stack: <code>make up --build</code></li>
+            <li>Add one row for it to <code>board-console/data/combined_boards.csv</code>
+              (provider, board, company columns)</li>
+            <li>Optionally add it to <code>providerKind</code> in <code>providerkind.go</code>,
+              or it'll show under the "Unclassified" tab</li>
+          </ol>
+        </details>
+      </div>
 
       <div class="dialog-actions">
-        <button type="button" id="new-provider-cancel" class="btn btn-secondary">Cancel</button>
+        <button type="button" id="new-provider-cancel" data-dialog-close class="btn btn-secondary">Cancel</button>
         <button type="submit" id="new-provider-submit" class="btn btn-primary">Add row</button>
       </div>
     </form>
   </dialog>
+
+  {{template "schedule-modal" .ScheduleModal}}
   <script id="provider-kinds-data" type="application/json">{{.ProviderKindsJSON}}</script>
 </main>
 <script src="/static/app.js"></script>

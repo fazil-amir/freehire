@@ -24,6 +24,7 @@ type App struct {
 	activity  *ActivityLog
 	schedules *ScheduleStore
 	runner    *Runner
+	cleanup   *CleanupStore
 	sessions  *SessionStore
 	db        *DBStore // nil when DATABASE_URL is unset or the open failed — every reader falls back gracefully
 }
@@ -67,7 +68,12 @@ func main() {
 		}
 	}
 
-	runner := NewRunner(csvStore, activity, dbStore, binariesFromEnv())
+	cleanupStore, err := NewCleanupStore(dataDir + "/cleanup.json")
+	if err != nil {
+		log.Fatalf("load cleanup.json: %v", err)
+	}
+
+	runner := NewRunner(csvStore, activity, dbStore, cleanupStore, binariesFromEnv())
 	scheduler := NewScheduler(scheduleStore, runner)
 
 	stop := make(chan struct{})
@@ -79,6 +85,7 @@ func main() {
 		activity:  activity,
 		schedules: scheduleStore,
 		runner:    runner,
+		cleanup:   cleanupStore,
 		sessions:  NewSessionStore(),
 		db:        dbStore,
 	}
@@ -95,7 +102,9 @@ func main() {
 	mux.HandleFunc("POST /bulk", requireAuth(app.sessions, handleBulkCrawl(app)))
 	mux.HandleFunc("POST /new-provider", requireAuth(app.sessions, handleNewProvider(app)))
 
-	mux.HandleFunc("GET /providers", requireAuth(app.sessions, handleProviders(app)))
+	// Providers was merged into Catalog as its "Added" filter; the old URL
+	// keeps working for bookmarks.
+	mux.Handle("GET /providers", http.RedirectHandler("/?show=added", http.StatusMovedPermanently))
 
 	mux.HandleFunc("GET /schedules", requireAuth(app.sessions, handleSchedules(app)))
 	mux.HandleFunc("POST /schedules/save", requireAuth(app.sessions, handleScheduleSave(app)))
@@ -104,6 +113,8 @@ func main() {
 
 	mux.HandleFunc("GET /activity", requireAuth(app.sessions, handleActivity(app)))
 	mux.HandleFunc("GET /activity/status", requireAuth(app.sessions, handleActivityStatus(app)))
+	mux.HandleFunc("POST /cleanup/preview", requireAuth(app.sessions, handleCleanup(app, false)))
+	mux.HandleFunc("POST /cleanup/run", requireAuth(app.sessions, handleCleanup(app, true)))
 
 	mux.Handle("GET /static/", http.FileServerFS(staticFS))
 
@@ -125,6 +136,7 @@ func binariesFromEnv() Binaries {
 	b.BulkAddBoards = envOr("BULK_ADD_BOARDS_BIN", b.BulkAddBoards)
 	b.Ingest = envOr("INGEST_BIN", b.Ingest)
 	b.Reindex = envOr("REINDEX_BIN", b.Reindex)
+	b.CloseChronicBoards = envOr("CLOSE_CHRONIC_BOARDS_BIN", b.CloseChronicBoards)
 	b.CSVPath = envOr("DATA_DIR", "/app/data") + "/combined_boards.csv"
 	return b
 }

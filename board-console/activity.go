@@ -50,8 +50,9 @@ const activityPersistThrottle = 10 * time.Second
 // Run is one recorded subprocess invocation shown on the Activity page.
 type Run struct {
 	ID         int
-	Action     string // "add-boards" / "ingest" / "reindex"
-	Provider   string // empty for reindex
+	Action     string // "add-boards" / "ingest" / "reindex" / "close-chronic-boards"
+	Provider   string // empty for reindex and close-chronic-boards
+	Label      string // shown beside the action, e.g. "dry run"; usually empty
 	Status     RunStatus
 	Stdout     string
 	Stderr     string
@@ -122,7 +123,13 @@ func NewActivityLog(dataDir string, maxRuns int) (*ActivityLog, error) {
 // Start records a new running entry and returns it so the caller can stream
 // output into it and call Finish.
 func (a *ActivityLog) Start(action, provider string) *Run {
-	return a.start(action, provider, StatusRunning)
+	return a.start(action, provider, "", StatusRunning)
+}
+
+// StartLabeled is Start with a label shown beside the action on the
+// Activity page (a Preview's "dry run").
+func (a *ActivityLog) StartLabeled(action, provider, label string) *Run {
+	return a.start(action, provider, label, StatusRunning)
 }
 
 // StartQueued records a new entry as "queued" rather than "running" —
@@ -130,10 +137,10 @@ func (a *ActivityLog) Start(action, provider string) *Run {
 // for a concurrency slot (see Runner's ingest semaphore). Call MarkRunning
 // once that slot is actually acquired.
 func (a *ActivityLog) StartQueued(action, provider string) *Run {
-	return a.start(action, provider, StatusQueued)
+	return a.start(action, provider, "", StatusQueued)
 }
 
-func (a *ActivityLog) start(action, provider string, status RunStatus) *Run {
+func (a *ActivityLog) start(action, provider, label string, status RunStatus) *Run {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.nextID++
@@ -141,6 +148,7 @@ func (a *ActivityLog) start(action, provider string, status RunStatus) *Run {
 		ID:          a.nextID,
 		Action:      action,
 		Provider:    provider,
+		Label:       label,
 		Status:      status,
 		StartedAt:   time.Now(),
 		lastPersist: time.Now(),

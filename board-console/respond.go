@@ -25,11 +25,11 @@ func actionDone(w http.ResponseWriter, r *http.Request, fallback string) {
 	http.Redirect(w, r, backTo(r, fallback), http.StatusSeeOther)
 }
 
-// actionError reports a validation failure to a fetch caller as JSON the
-// modal can show inline.
-func actionError(w http.ResponseWriter, msg string) {
+// actionError reports a refused action to a fetch caller as JSON the page
+// can show — a 422 for a validation failure, a 409 for a conflict.
+func actionError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusUnprocessableEntity)
+	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 

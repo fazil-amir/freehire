@@ -2,22 +2,37 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"html/template"
 	"net/http"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const catalogPageSize = 50
 
 // ProviderSummary aggregates the CSV's per-company rows into one row per
-// provider for the catalog table.
+// provider for the catalog table, joined (by attachRunState, for the rows
+// on the current page only) with the schedule store and the activity log.
 type ProviderSummary struct {
 	Provider     string
 	Kind         string
 	CompanyCount int
 	AddedCount   int
+
+	HasSchedule     bool
+	ScheduleID      string // for the kebab menu's edit/delete items
+	ScheduleEnabled bool
+	Interval        string
+	IntervalValue   string // Interval split for the schedule modal's fields
+	IntervalUnit    string
+	NextRun         time.Time
+	ReindexAfter    bool
+
+	LastRunAt     time.Time
+	LastRunStatus RunStatus
 }
 
 func (p ProviderSummary) FullyAdded() bool { return p.AddedCount == p.CompanyCount }
@@ -42,6 +57,7 @@ func buildCatalog(rows []BoardRow, kindFilter, query string, addedCounts map[str
 	}
 	byProvider := map[string]*acc{}
 	var order []string
+	boards := boardCounts(rows)
 
 	for _, row := range rows {
 		a, ok := byProvider[row.Provider]
@@ -50,7 +66,7 @@ func buildCatalog(rows []BoardRow, kindFilter, query string, addedCounts map[str
 			byProvider[row.Provider] = a
 			order = append(order, row.Provider)
 		}
-		a.count++
+		a.count = boards[row.Provider]
 		if rowMatchesSearch(row, terms) {
 			a.matched = true
 		}
@@ -139,6 +155,7 @@ type catalogPageData struct {
 	Active     string
 	Providers  []ProviderSummary
 	KindFilter string
+	AddedOnly  bool // ?show=added — what used to be the separate Providers page
 	Query      string
 	Page       int
 	TotalPages int
@@ -152,6 +169,8 @@ type catalogPageData struct {
 	NewProviderForm      newProviderForm
 	NewProviderError     string
 	OpenNewProviderModal bool
+
+	ScheduleModal scheduleModal
 }
 
 // buildCatalogPageData assembles everything the catalog template needs from
@@ -162,6 +181,7 @@ type catalogPageData struct {
 func buildCatalogPageData(app *App, r *http.Request) catalogPageData {
 	q := r.URL.Query()
 	kindFilter := q.Get("kind")
+	addedOnly := q.Get("show") == "added"
 	query := q.Get("q")
 	page, _ := strconv.Atoi(q.Get("page"))
 	if page < 1 {
@@ -170,6 +190,9 @@ func buildCatalogPageData(app *App, r *http.Request) catalogPageData {
 
 	addedCounts, dbError := resolveAddedCounts(r.Context(), app)
 	all := buildCatalog(app.csv.Rows(), kindFilter, query, addedCounts)
+	if addedOnly {
+		all = keepAdded(all)
+	}
 	total := len(all)
 	totalPages := (total + catalogPageSize - 1) / catalogPageSize
 	if totalPages < 1 {
@@ -187,11 +210,25 @@ func buildCatalogPageData(app *App, r *http.Request) catalogPageData {
 		end = len(all)
 	}
 
+	pageRows := all[start:end]
+	attachRunState(app, pageRows)
+
+	// The schedule modal's dropdown offers the added providers; a kebab
+	// item for any other opens it with that provider added to the list.
+	var addedProviders []string
+	for p, n := range addedCounts {
+		if n > 0 {
+			addedProviders = append(addedProviders, p)
+		}
+	}
+	sort.Strings(addedProviders)
+
 	knownProviders := app.csv.DistinctProviders()
 	return catalogPageData{
 		Active:            "catalog",
-		Providers:         all[start:end],
+		Providers:         pageRows,
 		KindFilter:        kindFilter,
+		AddedOnly:         addedOnly,
 		Query:             query,
 		Page:              page,
 		TotalPages:        totalPages,
@@ -200,6 +237,70 @@ func buildCatalogPageData(app *App, r *http.Request) catalogPageData {
 		DBError:           dbError,
 		NewProviderKinds:  []string{KindATS, KindAggregator, KindCareerSite},
 		ProviderKindsJSON: providerKindsJSON(knownProviders),
+		ScheduleModal:     newScheduleModal(addedProviders),
+	}
+}
+
+func keepAdded(all []ProviderSummary) []ProviderSummary {
+	var out []ProviderSummary
+	for _, p := range all {
+		if p.AddedCount > 0 {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// attachRunState fills each row's schedule and last-run columns in place.
+// One schedule per provider is the common case this tool expects; if more
+// than one exists, the last one in store order wins — good enough for a
+// summary column, not a scheduling authority (Schedules is that).
+func attachRunState(app *App, rows []ProviderSummary) {
+	scheduleByProvider := map[string]Schedule{}
+	for _, s := range app.schedules.List() {
+		scheduleByProvider[s.Provider] = s
+	}
+
+	// Most recent run per provider — List() is already newest-first, so the
+	// first match for a provider is its most recent run of any kind.
+	lastRunByProvider := map[string]*Run{}
+	for _, run := range app.activity.List() {
+		if run.Provider == "" {
+			continue
+		}
+		if _, ok := lastRunByProvider[run.Provider]; !ok {
+			lastRunByProvider[run.Provider] = run
+		}
+	}
+
+	for i := range rows {
+		d := &rows[i]
+		if s, ok := scheduleByProvider[d.Provider]; ok {
+			d.HasSchedule = true
+			d.ScheduleID = s.ID
+			d.ScheduleEnabled = s.Enabled
+			d.Interval = formatInterval(s.Interval())
+			d.IntervalValue, d.IntervalUnit = splitInterval(s.IntervalSecs)
+			d.NextRun = s.NextRun()
+			d.ReindexAfter = s.ReindexAfter
+		}
+		if run, ok := lastRunByProvider[d.Provider]; ok {
+			d.LastRunAt = run.StartedAt
+			d.LastRunStatus = run.Status
+		}
+	}
+}
+
+// formatInterval renders a schedule interval the way an operator picked
+// it — "15m"/"6h"/"2d" — rather than a raw second count.
+func formatInterval(d time.Duration) string {
+	switch {
+	case d >= 24*time.Hour && d%(24*time.Hour) == 0:
+		return fmt.Sprintf("%dd", int(d/(24*time.Hour)))
+	case d >= time.Hour && d%time.Hour == 0:
+		return fmt.Sprintf("%dh", int(d/time.Hour))
+	default:
+		return fmt.Sprintf("%dm", int(d/time.Minute))
 	}
 }
 
@@ -338,6 +439,8 @@ func handleNewProvider(app *App) http.HandlerFunc {
 			errMsg = "Board is required for ATS platforms."
 		case form.Company == "":
 			errMsg = "Company is required."
+		case app.csv.HasBoard(form.Provider, form.Board):
+			errMsg = form.Provider + " is already in the catalog" + boardSuffix(form.Board) + " — use Crawl on its row instead."
 		}
 
 		if errMsg != "" {
@@ -376,4 +479,13 @@ func providerKindsJSON(providers []string) template.JS {
 		return "{}"
 	}
 	return template.JS(b)
+}
+
+// boardSuffix names the board in the duplicate-row message, when there is
+// one to name (an Aggregator or Career site is boardless).
+func boardSuffix(board string) string {
+	if board == "" {
+		return ""
+	}
+	return " with board " + board
 }

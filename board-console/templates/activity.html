@@ -7,27 +7,82 @@
 <body>
 {{template "nav" .}}
 <main>
+  {{/* Both tabs render the same shape — one-line subtitle, header buttons,
+       toolbar slots — so switching tabs never moves the table. */}}
   <div class="page-header">
-    <h1>Activity</h1>
+    <div>
+      <h1>Activity</h1>
+      {{if .CleanupView}}
+      <p class="page-subtitle" title="Closed jobs drop out of search; nothing is deleted, and a board that comes back reopens its jobs on the next crawl.">
+        Runs daily. Closes jobs from boards dead for 60 days or empty for 30 — nothing is deleted.</p>
+      {{else}}
+      <p class="page-subtitle">Crawls, board additions and reindexes, newest first — click a run for its output.</p>
+      {{end}}
+    </div>
+    <div class="page-actions">
+      {{if .CleanupView}}
+      <form method="post" action="/cleanup/preview" data-async data-refresh
+            data-done="Preview started — it changes nothing; open its row below for the report">
+        <button type="submit" class="btn btn-secondary">Preview</button>
+      </form>
+      <form method="post" action="/cleanup/run" data-async data-refresh
+            data-confirm="Close the open jobs of every dead board now? They drop out of search; nothing is deleted, and a board that comes back reopens them."
+            data-done="Dead board cleanup started">
+        <button type="submit" class="btn btn-primary">Run now</button>
+      </form>
+      {{else}}
+      <form method="post" action="/reindex" data-async data-refresh
+            data-done="Reindex started — rebuilding the search index from everything stored">
+        <button type="submit" class="btn btn-primary">Reindex now</button>
+      </form>
+      {{end}}
+    </div>
   </div>
 
   <div class="table-card">
-    <form method="get" action="/activity" class="toolbar" id="activity-filters">
-      <select name="status" onchange="this.form.submit()">
-        <option value="">All statuses</option>
-        <option value="running" {{if eq .StatusFilter "running"}}selected{{end}}>Running</option>
-        <option value="done" {{if eq .StatusFilter "done"}}selected{{end}}>Done</option>
-        <option value="failed" {{if eq .StatusFilter "failed"}}selected{{end}}>Failed</option>
-      </select>
-      <select name="action" onchange="this.form.submit()">
-        <option value="">All actions</option>
-        <option value="add-boards" {{if eq .ActionFilter "add-boards"}}selected{{end}}>add-boards</option>
-        <option value="ingest" {{if eq .ActionFilter "ingest"}}selected{{end}}>ingest</option>
-        <option value="reindex" {{if eq .ActionFilter "reindex"}}selected{{end}}>reindex</option>
-      </select>
-      <input type="search" name="provider" id="activity-provider-filter" value="{{.ProviderFilter}}"
-             placeholder="Filter by provider…" autocomplete="off">
+    <form method="get" action="/activity" class="toolbar toolbar-split" id="activity-filters">
+      {{if .CleanupView}}<input type="hidden" name="view" value="cleanup">{{end}}
+      <div class="segmented" role="group" aria-label="View">
+        <a href="/activity" class="{{if not .CleanupView}}active{{end}}">Pipeline</a>
+        <a href="/activity?view=cleanup" class="{{if .CleanupView}}active{{end}}">Cleanup</a>
+      </div>
+      <div class="toolbar-filters">
+        <select name="status" onchange="this.form.submit()">
+          <option value="">All statuses</option>
+          <option value="running" {{if eq .StatusFilter "running"}}selected{{end}}>Running</option>
+          <option value="done" {{if eq .StatusFilter "done"}}selected{{end}}>Done</option>
+          <option value="failed" {{if eq .StatusFilter "failed"}}selected{{end}}>Failed</option>
+        </select>
+        {{if not .CleanupView}}
+        <select name="action" onchange="this.form.submit()">
+          <option value="">All actions</option>
+          <option value="add-boards" {{if eq .ActionFilter "add-boards"}}selected{{end}}>add-boards</option>
+          <option value="ingest" {{if eq .ActionFilter "ingest"}}selected{{end}}>ingest</option>
+          <option value="reindex" {{if eq .ActionFilter "reindex"}}selected{{end}}>reindex</option>
+        </select>
+        {{end}}
+      </div>
+      {{if .CleanupView}}
+      {{/* Cleanup runs carry no provider, so this slot holds the schedule
+           instead of a search — refreshed in place when a run finishes. */}}
+      <div class="toolbar-end cleanup-status" data-live-region>
+        <span class="muted">Last</span>
+        {{if .Cleanup.LastRun.IsZero}}<span class="muted">never</span>
+        {{else}}<span class="badge badge-{{.Cleanup.LastStatus}}">{{.Cleanup.LastStatus}}</span>
+          <time datetime="{{iso .Cleanup.LastRun}}" data-local>{{.Cleanup.LastRun.UTC.Format "02/01/2006 - 15:04:05"}} UTC</time>{{end}}
+        <span class="cleanup-sep"></span>
+        <span class="muted">Next</span>
+        {{if .Cleanup.DueNow}}<span class="badge badge-running">due now</span>
+        {{else}}<time datetime="{{iso .Cleanup.NextRun}}" data-local>{{.Cleanup.NextRun.UTC.Format "02/01/2006 - 15:04:05"}} UTC</time>{{end}}
+      </div>
+      {{else}}
+      <div class="toolbar-end">
+        <input type="search" name="provider" id="activity-provider-filter" value="{{.ProviderFilter}}"
+               placeholder="Filter by provider…" autocomplete="off">
+      </div>
+      {{end}}
     </form>
+    <div data-live-region>
     <table class="catalog-table" id="activity-table">
       <thead>
         <tr>
@@ -41,9 +96,9 @@
       <tbody>
         {{range .Runs}}
         <tr class="run-row" data-run-id="{{.ID}}">
-          <td>{{.StartedAt.Format "2006-01-02 15:04:05"}}</td>
-          <td>{{.Action}}</td>
-          <td>{{.Provider}}</td>
+          <td><time datetime="{{iso .StartedAt}}" data-local>{{.StartedAt.UTC.Format "02/01/2006 - 15:04:05"}} UTC</time></td>
+          <td><span class="pill pill-{{.Action}}">{{.Action}}</span>{{if .Label}} <span class="pill">{{.Label}}</span>{{end}}</td>
+          <td>{{if .Provider}}{{.Provider}}{{else}}<span class="muted">—</span>{{end}}</td>
           <td><span class="badge badge-{{.Status}} status-badge">{{.Status}}</span></td>
           <td class="duration-cell">{{.Duration}}</td>
         </tr>
@@ -59,10 +114,17 @@ error: {{.Err}}{{end}}</pre>
           </td>
         </tr>
         {{else}}
-        <tr><td colspan="5" class="muted">No runs yet.</td></tr>
+        <tr><td colspan="5" class="muted">{{if .CleanupView}}No cleanup runs yet — try Preview.{{else}}No runs yet.{{end}}</td></tr>
         {{end}}
       </tbody>
     </table>
+
+    <div class="table-footer">
+      {{if .PrevURL}}<a class="page-link" href="{{.PrevURL}}">← Prev</a>{{end}}
+      <span class="muted">Page {{.Page}} / {{.TotalPages}} · {{.Total}} runs</span>
+      {{if .NextURL}}<a class="page-link" href="{{.NextURL}}">Next →</a>{{end}}
+    </div>
+    </div>
   </div>
 </main>
 <script src="/static/app.js"></script>

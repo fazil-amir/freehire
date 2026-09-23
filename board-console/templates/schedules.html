@@ -31,12 +31,20 @@
         {{range .Schedules}}
         <tr>
           <td>{{.Provider}}</td>
-          <td>{{.IntervalSecs}}s</td>
-          <td>{{if .NextRun.IsZero}}due now{{else}}{{.NextRun.Format "2006-01-02 15:04"}}{{end}}</td>
+          <td><span class="pill">every {{.Interval}}</span></td>
           <td>
-            {{if .LastRun.IsZero}}never{{else}}{{.LastRun.Format "2006-01-02 15:04"}} ({{.LastStatus}}){{end}}
+            {{if not .Enabled}}<span class="badge badge-no">paused</span>
+            {{else if .NextRun.IsZero}}<span class="badge badge-running">due now</span>
+            {{else}}<time datetime="{{iso .NextRun}}" data-local>{{.NextRun.UTC.Format "02/01/2006 - 15:04:05"}} UTC</time>{{end}}
           </td>
-          <td>{{if .ReindexAfter}}yes{{else}}no{{end}}</td>
+          <td>
+            {{if .LastRun.IsZero}}<span class="muted">never</span>
+            {{else}}
+              <span class="badge {{if eq .LastStatus "failed"}}badge-failed{{else}}badge-done{{end}}">{{.LastStatus}}</span>
+              <div class="cell-sub"><time datetime="{{iso .LastRun}}" data-local>{{.LastRun.UTC.Format "02/01/2006 - 15:04:05"}} UTC</time></div>
+            {{end}}
+          </td>
+          <td>{{if .ReindexAfter}}<span class="pill pill-reindex">reindex</span>{{else}}<span class="muted">—</span>{{end}}</td>
           <td class="col-toggle">
             <form method="post" action="/schedules/toggle" class="inline-form">
               <input type="hidden" name="id" value="{{.ID}}">

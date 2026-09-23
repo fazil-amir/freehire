@@ -38,3 +38,22 @@ func TestBuildCatalog_AddedCountFromDBCappedAtCandidates(t *testing.T) {
 		t.Fatalf("want AddedCount capped at CompanyCount (1), got %+v", out)
 	}
 }
+
+func TestBuildCatalog_CountsBoardsByFreehireIdentityNotRows(t *testing.T) {
+	// freehire's boards are UNIQUE on (provider, lower(board)): these three
+	// rows are two boards, and a boardless aggregator listed twice is one.
+	// Counting rows left such a provider "partially added" forever.
+	rows := []BoardRow{
+		{Provider: "ashby", Board: "AeroVect", Company: "Aerovect"},
+		{Provider: "ashby", Board: "aerovect", Company: "AeroVect"},
+		{Provider: "ashby", Board: "arch", Company: "Arch"},
+		{Provider: "jobdanmark", Board: "", Company: "JobiDanmark"},
+		{Provider: "jobdanmark", Board: "", Company: "Jobdanmark"},
+	}
+	out := buildCatalog(rows, "", "", map[string]int{"ashby": 2, "jobdanmark": 1})
+	for _, p := range out {
+		if !p.FullyAdded() {
+			t.Errorf("%s: want fully added, got %d/%d", p.Provider, p.AddedCount, p.CompanyCount)
+		}
+	}
+}

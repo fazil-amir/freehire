@@ -207,6 +207,48 @@ func (s *CSVStore) AddedProviders() []string {
 	return out
 }
 
+// boardKey is freehire's identity for a board — the boards table is UNIQUE
+// on (provider, lower(board), region), and the CSV carries no region. Two
+// CSV rows sharing a key are ONE board to freehire however their casing or
+// company differs ("AeroVect" and "aerovect"), so every "how many boards
+// does this provider have" count must go by key, never by row: counting
+// rows left such a provider "partially added" forever, since the second
+// row can never be added — freehire rejects it as a duplicate.
+func boardKey(provider, board string) string {
+	return provider + "\x00" + strings.ToLower(board)
+}
+
+// boardCounts is how many distinct boards (see boardKey) each provider has
+// among rows — the denominator every "N of M added" figure is measured
+// against.
+func boardCounts(rows []BoardRow) map[string]int {
+	seen := map[string]bool{}
+	counts := map[string]int{}
+	for _, r := range rows {
+		k := boardKey(r.Provider, r.Board)
+		if !seen[k] {
+			seen[k] = true
+			counts[r.Provider]++
+		}
+	}
+	return counts
+}
+
+// HasBoard reports whether the CSV already holds this provider's board
+// under freehire's identity rule — what "+ New provider" checks so it never
+// appends a row freehire would reject as a duplicate.
+func (s *CSVStore) HasBoard(provider, board string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	k := boardKey(provider, board)
+	for _, r := range s.rows {
+		if boardKey(r.Provider, r.Board) == k {
+			return true
+		}
+	}
+	return false
+}
+
 // FullyAddedProviders returns the set of providers whose CSV rows are ALL
 // marked added=true — the single source of truth for "already added"
 // across the app. A provider with even one un-added row is NOT in this
@@ -216,11 +258,14 @@ func (s *CSVStore) AddedProviders() []string {
 func (s *CSVStore) FullyAddedProviders() map[string]bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	total := map[string]int{}
+	total := boardCounts(s.rows)
+	// A board counts as added when any of its rows is — see boardKey.
+	addedKeys := map[string]bool{}
 	added := map[string]int{}
 	for _, r := range s.rows {
-		total[r.Provider]++
-		if r.Added {
+		k := boardKey(r.Provider, r.Board)
+		if r.Added && !addedKeys[k] {
+			addedKeys[k] = true
 			added[r.Provider]++
 		}
 	}

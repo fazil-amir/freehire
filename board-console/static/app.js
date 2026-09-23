@@ -54,12 +54,13 @@ function toast(message, isError) {
   setTimeout(function () { el.remove(); }, isError ? 5400 : 2900);
 }
 
-// Re-renders the page's [data-live-region] (its table) from the server,
-// in place — the same Go template a full load would use, so an action's
-// effect shows without a navigation or a second copy of the row markup.
+// Re-renders the page's [data-live-region]s (its table, a status card)
+// from the server, in place — the same Go template a full load would use,
+// so an action's effect shows without a navigation or a second copy of the
+// markup. Regions are matched to the fresh page's by order.
 function refreshLiveRegion() {
-  var region = document.querySelector("[data-live-region]");
-  if (!region) return Promise.resolve();
+  var regions = document.querySelectorAll("[data-live-region]");
+  if (!regions.length) return Promise.resolve();
   return fetch(window.location.pathname + window.location.search, {
     headers: { "X-Board-Console-Fetch": "1" }
   })
@@ -69,10 +70,29 @@ function refreshLiveRegion() {
     })
     .then(function (html) {
       if (!html) return;
-      var fresh = new DOMParser().parseFromString(html, "text/html").querySelector("[data-live-region]");
-      if (fresh) region.innerHTML = fresh.innerHTML;
+      var fresh = new DOMParser().parseFromString(html, "text/html").querySelectorAll("[data-live-region]");
+      regions.forEach(function (region, i) {
+        if (fresh[i]) region.innerHTML = fresh[i].innerHTML;
+      });
+      document.dispatchEvent(new Event("liveregion:refreshed"));
     });
 }
+
+// Any [data-dialog-close] (the header's ×, a Cancel button) closes its
+// dialog, as does a click on the backdrop — which lands on the <dialog>
+// element itself, outside its content box.
+document.addEventListener("click", function (e) {
+  var closer = e.target.closest("[data-dialog-close]");
+  if (closer) {
+    closer.closest("dialog").close();
+    return;
+  }
+  if (e.target.tagName === "DIALOG") {
+    var r = e.target.getBoundingClientRect();
+    var inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+    if (!inside) e.target.close();
+  }
+});
 
 // Row actions — kebab items and Catalog's Crawl buttons — are
 // <form data-async>: submitted in the background, confirmed with a toast,
@@ -92,6 +112,23 @@ document.addEventListener("submit", function (e) {
     .catch(function (err) { toast(err.message, true); });
 });
 
+// Times are rendered by the server in UTC (its container's zone); every
+// <time data-local> is rewritten here in the VIEWER's timezone, in the one
+// format used everywhere: "20/12/2026 - 16:30:50". Re-run after anything
+// swaps table HTML in.
+function localizeTimes() {
+  function pad(n) { return String(n).padStart(2, "0"); }
+  document.querySelectorAll("time[data-local]").forEach(function (el) {
+    var d = new Date(el.getAttribute("datetime"));
+    if (isNaN(d)) return;
+    el.textContent = pad(d.getDate()) + "/" + pad(d.getMonth() + 1) + "/" + d.getFullYear() + " - " +
+      pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
+    el.title = d.toString();
+  });
+}
+localizeTimes();
+document.addEventListener("liveregion:refreshed", localizeTimes);
+
 // Real-time catalog search: every keystroke (debounced) fetches the
 // results fragment and swaps it in place — no reload, no Search button.
 // The surrounding <form> still works as a plain GET via Enter or without
@@ -99,6 +136,7 @@ document.addEventListener("submit", function (e) {
 (function () {
   var input = document.getElementById("search-input");
   var kindInput = document.getElementById("search-kind");
+  var showInput = document.getElementById("search-show");
   var results = document.getElementById("catalog-results");
   if (!input || !results) return;
 
@@ -108,11 +146,13 @@ document.addEventListener("submit", function (e) {
     var params = new URLSearchParams();
     params.set("kind", kindInput ? kindInput.value : "");
     params.set("q", input.value);
+    if (showInput) params.set("show", showInput.value);
 
     fetch("/catalog/results?" + params.toString())
       .then(function (r) { return r.text(); })
       .then(function (html) {
         results.innerHTML = html;
+        localizeTimes();
         history.replaceState(null, "", "/?" + params.toString());
       })
       .catch(function () { /* leave the current results showing */ });
@@ -142,7 +182,6 @@ document.addEventListener("submit", function (e) {
 // kind came back selected.
 (function () {
   var openBtn = document.getElementById("new-provider-btn");
-  var cancelBtn = document.getElementById("new-provider-cancel");
   var dialog = document.getElementById("new-provider-dialog");
   var kindSelect = document.getElementById("new-provider-kind");
   var providerInput = document.getElementById("new-provider-input");
@@ -249,8 +288,6 @@ document.addEventListener("submit", function (e) {
   } else {
     openBtn.addEventListener("click", function () { dialog.showModal(); });
   }
-
-  cancelBtn.addEventListener("click", function () { dialog.close(); });
 
   if (dialog.dataset.openOnLoad === "true") dialog.showModal();
 
@@ -364,8 +401,6 @@ function showScheduleError(dialog, message) {
     } : null);
   });
 
-  dialog.querySelector("[data-schedule-cancel]").addEventListener("click", function () { dialog.close(); });
-
   if (dialog.dataset.openOnLoad === "true") dialog.showModal();
 
   var minutesPerUnit = { minutes: 1, hours: 60, days: 1440 };
@@ -382,8 +417,8 @@ function showScheduleError(dialog, message) {
     }
 
     var minutes = (minutesPerUnit[unitSelect.value] || 1) * Number(valueInput.value || 0);
-    if (!valueInput.value || minutes < 15) {
-      setFieldError(valueInput, "Interval must be at least 15 minutes.");
+    if (!valueInput.value || minutes < 2) {
+      setFieldError(valueInput, "Interval must be at least 2 minutes.");
       ok = false;
     } else {
       setFieldError(valueInput, "");
@@ -404,18 +439,20 @@ function showScheduleError(dialog, message) {
 
 // Activity page: click a run row to expand its captured output, and poll
 // while anything is still running — patching status/duration/log text in
-// place rather than reloading, so a live crawl's output grows visibly and
-// an expanded row stays expanded.
+// place, so a live crawl's output grows visibly and an expanded row stays
+// expanded. When the set of runs on this page changes (a run started, the
+// "Reindex now" button), the table is re-rendered in place with the same
+// rows still expanded — never a full page reload.
 (function () {
-  document.querySelectorAll(".run-row").forEach(function (row) {
-    row.addEventListener("click", function () {
-      var detail = document.getElementById("detail-" + row.dataset.runId);
-      if (detail) detail.hidden = !detail.hidden;
-    });
-  });
+  if (!document.getElementById("activity-table")) return;
 
-  var table = document.getElementById("activity-table");
-  if (!table) return;
+  // Delegated: the table's rows are replaced on every in-place refresh.
+  document.addEventListener("click", function (e) {
+    var row = e.target.closest(".run-row");
+    if (!row) return;
+    var detail = document.getElementById("detail-" + row.dataset.runId);
+    if (detail) detail.hidden = !detail.hidden;
+  });
 
   // The provider filter auto-submits (debounced) like the catalog search;
   // the status/action selects already submit on change (see the template).
@@ -435,11 +472,28 @@ function showScheduleError(dialog, message) {
     return text;
   }
 
+  function refreshKeepingOpen() {
+    var open = Array.prototype.map.call(
+      document.querySelectorAll(".run-detail:not([hidden])"),
+      function (el) { return el.id; }
+    );
+    return refreshLiveRegion().then(function () {
+      open.forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.hidden = false;
+      });
+    });
+  }
+
+  var timer = null;
+  function schedulePoll(ms) {
+    clearTimeout(timer);
+    timer = setTimeout(poll, ms);
+  }
+
   function poll() {
-    // Carry the same filters the page was rendered with, so the server
-    // returns the SAME set of runs shown here — otherwise every run the
-    // active filter hides would look like "the set changed" below and
-    // trigger a reload on every single poll tick.
+    // Carry the same filters and page the page was rendered with, so the
+    // server returns the SAME set of runs shown here.
     fetch("/activity/status" + window.location.search)
       .then(function (r) { return r.json(); })
       .then(function (data) {
@@ -453,14 +507,25 @@ function showScheduleError(dialog, message) {
           knownIds.every(function (id) { return newIds.indexOf(id) !== -1; });
 
         if (!sameSet) {
-          // A new run started (or the ring buffer rotated one out) since
-          // this page loaded — simplest correct thing is a fresh render.
-          window.location.reload();
+          // The refresh announces itself, which schedules the next poll.
+          refreshKeepingOpen();
+          return;
+        }
+
+        // A run that just finished can change more than its own row (the
+        // cleanup card's last run), so re-render rather than patch.
+        var finished = runs.some(function (r) {
+          var badge = document.querySelector('.run-row[data-run-id="' + r.id + '"] .status-badge');
+          return badge && (badge.textContent === "running" || badge.textContent === "queued") &&
+            (r.status === "done" || r.status === "failed");
+        });
+        if (finished) {
+          refreshKeepingOpen();
           return;
         }
 
         runs.forEach(function (r) {
-          var row = table.querySelector('.run-row[data-run-id="' + r.id + '"]');
+          var row = document.querySelector('.run-row[data-run-id="' + r.id + '"]');
           if (!row) return;
           var badge = row.querySelector(".status-badge");
           badge.textContent = r.status;
@@ -473,10 +538,12 @@ function showScheduleError(dialog, message) {
           }
         });
 
-        if (data.running) setTimeout(poll, 2000);
+        if (data.running) schedulePoll(2000);
       })
-      .catch(function () { setTimeout(poll, 3000); });
+      .catch(function () { schedulePoll(3000); });
   }
+
+  document.addEventListener("liveregion:refreshed", function () { schedulePoll(1000); });
   poll();
 })();
 

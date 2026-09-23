@@ -72,8 +72,8 @@ board-console/
   respond.go             how a POST action answers: 204/422 to app.js's
                         fetch, a redirect back to the referring page
                         otherwise (isFetch, actionDone, actionError)
-  handlers_*.go          one file per screen: catalog, providers,
-                        schedules, activity — each owns its
+  handlers_*.go          one file per screen: catalog (which is
+                        also the providers view), schedules, activity — each owns its
                         build*PageData function and HTTP handlers
   templates/*.html        one {{define}} per page/fragment; catalog.html +
                         catalog-results.html split because the latter is
@@ -143,6 +143,10 @@ board-console/
   overflow for its rounded corners, so an absolutely positioned menu was
   cut off in a short table. Layering lives in two tokens, `--z-dropdown`
   and `--z-toast`; use them rather than a literal z-index.
+- **Every dialog is header / body / footer** (`.dialog-header`,
+  `.dialog-body`, `.dialog-actions`), closed by any `[data-dialog-close]`
+  or a backdrop click — both handled once in app.js. Follow that shape for
+  a new dialog rather than styling one by hand.
 - **Kind-driven fields in "+ New provider"** (`handlers_catalog.go`,
   `app.js`): an ATS platform needs Provider+Board+Company, an Aggregator
   needs Provider only (Board forced blank, Company auto-derived via
@@ -158,7 +162,8 @@ board-console/
 - **CSS is one file, one fixed dark palette** (`static/style.css`) — no
   light/dark media query, unlike freehire's own design system. The tokens
   at the top (`--bg`, `--surface`, `--accent`, ...) are board-console's
-  own identity, deliberately not a copy of freehire's brand green; keep
+  own identity (neutral greys, colour only for status and the Activity
+  action pills), deliberately not a copy of freehire's brand green; keep
   new component styles referencing those custom properties rather than
   literal colors.
 - **`data/*` files you create while testing locally are real, tracked

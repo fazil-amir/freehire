@@ -3,37 +3,46 @@
      — and driven by openScheduleModal() in app.js. Server-side values here
      only matter for the no-JS path (a validation round-trip reopening it). */}}
 {{define "schedule-modal"}}
-<dialog id="schedule-dialog" {{if .Open}}data-open-on-load="true"{{end}}>
-  <form method="post" action="/schedules/save" class="schedule-form" novalidate>
+<dialog id="schedule-dialog" class="dialog-sm" {{if .Open}}data-open-on-load="true"{{end}}>
+  <form method="post" action="/schedules/save" novalidate>
     <input type="hidden" name="id" value="{{.Form.ID}}">
-    <h2>{{if .Form.ID}}Edit schedule{{else}}Add schedule{{end}}</h2>
-    <p class="field-error" {{if not .Error}}hidden{{end}}>{{.Error}}</p>
-
-    <label>Provider
-      <select name="provider">
-        <option value="" {{if not .Form.Provider}}selected{{end}} disabled>Select an added provider…</option>
-        {{range .Providers}}
-        <option value="{{.}}" {{if eq . $.Form.Provider}}selected{{end}}>{{.}}</option>
-        {{end}}
-      </select>
-    </label>
-    <label>Interval
-      <div class="interval-row">
-        <input type="number" name="interval_value" min="1" value="{{.Form.IntervalValue}}">
-        <select name="interval_unit">
-          <option value="minutes" {{if eq .Form.IntervalUnit "minutes"}}selected{{end}}>minutes</option>
-          <option value="hours" {{if eq .Form.IntervalUnit "hours"}}selected{{end}}>hours</option>
-          <option value="days" {{if eq .Form.IntervalUnit "days"}}selected{{end}}>days</option>
-        </select>
+    <div class="dialog-header">
+      <div>
+        <h2>{{if .Form.ID}}Edit schedule{{else}}Add schedule{{end}}</h2>
+        <p class="dialog-subtitle">Crawl a provider automatically on a fixed interval.</p>
       </div>
-    </label>
-    <label class="checkbox-label">
-      <input type="checkbox" name="reindex_after" {{if .Form.ReindexAfter}}checked{{end}}> Reindex after this run
-    </label>
-    <p class="new-provider-help">Minimum interval is 15 minutes — a slow crawl can outlast a shorter one and overlap itself.</p>
+      {{template "dialog-close"}}
+    </div>
+
+    <div class="dialog-body">
+      <p class="field-error" {{if not .Error}}hidden{{end}}>{{.Error}}</p>
+
+      <label>Provider
+        <select name="provider">
+          <option value="" {{if not .Form.Provider}}selected{{end}} disabled>Select an added provider…</option>
+          {{range .Providers}}
+          <option value="{{.}}" {{if eq . $.Form.Provider}}selected{{end}}>{{.}}</option>
+          {{end}}
+        </select>
+      </label>
+      <label>Run every
+        <div class="interval-row">
+          <input type="number" name="interval_value" min="1" value="{{.Form.IntervalValue}}">
+          <select name="interval_unit">
+            <option value="minutes" {{if eq .Form.IntervalUnit "minutes"}}selected{{end}}>minutes</option>
+            <option value="hours" {{if eq .Form.IntervalUnit "hours"}}selected{{end}}>hours</option>
+            <option value="days" {{if eq .Form.IntervalUnit "days"}}selected{{end}}>days</option>
+          </select>
+        </div>
+        <span class="field-hint">Minimum 2 minutes.</span>
+      </label>
+      <label class="checkbox-label">
+        <input type="checkbox" name="reindex_after" {{if .Form.ReindexAfter}}checked{{end}}> Reindex after each run
+      </label>
+    </div>
 
     <div class="dialog-actions">
-      <button type="button" data-schedule-cancel class="btn btn-secondary">Cancel</button>
+      <button type="button" data-dialog-close class="btn btn-secondary">Cancel</button>
       <button type="submit" class="btn btn-primary">{{if .Form.ID}}Save changes{{else}}Save schedule{{end}}</button>
     </div>
   </form>
