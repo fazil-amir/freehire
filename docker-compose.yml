@@ -108,6 +108,10 @@ services:
       # all, so every model call degraded as "unconfigured" with no error. Empty is a
       # valid, working default (the same degrade-gracefully behaviour, just intentional
       # now) — set real values in .env to actually exercise a model-backed surface.
+      # Catalogue scope (see .env.example): false = every job, true = IT only. The server
+      # reads it on the link-import path, which must agree with ingest and the search index
+      # about what is searchable — so board-console below gets the SAME expression.
+      CATALOGUE_TECH_ONLY: "${CATALOGUE_TECH_ONLY:-false}"
       LLM_BASE_URL: "${LLM_BASE_URL:-}"
       LLM_API_KEY: "${LLM_API_KEY:-}"
       LLM_MODEL: "${LLM_MODEL:-}"
@@ -200,6 +204,10 @@ services:
       # for its own multi-million-job index; this catalogue's is far smaller.
       # Raise it as the index grows (check: du -sh /meili_data in meilisearch).
       REINDEX_MIN_FREE_GB: "${REINDEX_MIN_FREE_GB:-20}"
+      # Must match the app's value above: every ingest/reindex/recount board-console runs
+      # inherits it, and a crawl that disagrees with the site about what belongs in the
+      # catalogue stores (or drops) the wrong jobs. Override both at once from .env.
+      CATALOGUE_TECH_ONLY: "${CATALOGUE_TECH_ONLY:-false}"
     ports:
       - "${BOARD_CONSOLE_HOST_PORT:-8091}:8091"
     volumes:

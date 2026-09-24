@@ -99,6 +99,7 @@ func main() {
 	mux.HandleFunc("GET /catalog/results", requireAuth(app.sessions, handleCatalogResults(app)))
 	mux.HandleFunc("POST /crawl", requireAuth(app.sessions, handleCrawl(app)))
 	mux.HandleFunc("POST /reindex", requireAuth(app.sessions, handleReindexNow(app)))
+	mux.HandleFunc("POST /companies/refresh", requireAuth(app.sessions, handleCompanyRefresh(app)))
 	mux.HandleFunc("POST /bulk", requireAuth(app.sessions, handleBulkCrawl(app)))
 	mux.HandleFunc("POST /new-provider", requireAuth(app.sessions, handleNewProvider(app)))
 
@@ -137,6 +138,8 @@ func binariesFromEnv() Binaries {
 	b.Ingest = envOr("INGEST_BIN", b.Ingest)
 	b.Reindex = envOr("REINDEX_BIN", b.Reindex)
 	b.CloseChronicBoards = envOr("CLOSE_CHRONIC_BOARDS_BIN", b.CloseChronicBoards)
+	b.RecountCompanies = envOr("RECOUNT_COMPANIES_BIN", b.RecountCompanies)
+	b.ReindexCompanies = envOr("REINDEX_COMPANIES_BIN", b.ReindexCompanies)
 	b.CSVPath = envOr("DATA_DIR", "/app/data") + "/combined_boards.csv"
 	return b
 }

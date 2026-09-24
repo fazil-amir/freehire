@@ -48,7 +48,12 @@ func outOfCatalogue(j job.Job) bool {
 // because a hydrating adapter re-lists a posting without re-fetching its content. Passing the
 // STORED evidence is what keeps the two paths equivalent: judged on the content-less listing
 // instead, 1.7% of the titles the catalogue holds as technical would be turned away.
+//
+// classify.CatalogueTechOnly turns the whole filter off: with it false every posting belongs.
 func outOfCatalogueTitle(title string, hasTechEvidence bool) bool {
+	if !classify.CatalogueTechOnly() {
+		return false
+	}
 	return classify.ConfirmedNonTech(title, hasTechEvidence)
 }
 

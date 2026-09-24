@@ -105,6 +105,13 @@ func matchRule(c candidate, ev evidence, knownProvider, boardCrawled bool) (stri
 		return ruleMisattributed, true
 	}
 
+	// The rules below all decide whether a posting belongs on an IT board. A catalogue
+	// that accepts every posting has no such question to ask, and deleting here would
+	// remove exactly the rows ingest was just told to keep.
+	if !classify.CatalogueTechOnly() {
+		return "", false
+	}
+
 	// A source that is not a crawled board platform is out of reach of every rule below.
 	if !knownProvider {
 		return "", false

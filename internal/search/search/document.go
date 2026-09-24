@@ -8,6 +8,7 @@ import (
 
 	"github.com/strelov1/freehire/internal/ai/aiarchetype"
 	"github.com/strelov1/freehire/internal/ai/enrich"
+	"github.com/strelov1/freehire/internal/dict/classify"
 	"github.com/strelov1/freehire/internal/dict/roletype"
 	"github.com/strelov1/freehire/internal/dict/skillvec"
 	"github.com/strelov1/freehire/internal/job/jobview"
@@ -172,7 +173,13 @@ func FromJob(j db.Job) (JobDocument, error) {
 // dictionary alone or from a source's own structured signal (jobderive.Input.IsTechHint
 // — e.g. Profession's dedicated itdev/itops boards, issue #2601). Such a job stays
 // searchable even if its category never resolves further.
+//
+// With classify.CatalogueTechOnly false the catalogue deliberately holds that bulk, so
+// nothing is excluded on category grounds.
 func CategoryUnresolved(j db.Job) bool {
+	if !classify.CatalogueTechOnly() {
+		return false
+	}
 	if j.Category != "" {
 		return false
 	}

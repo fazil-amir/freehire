@@ -48,6 +48,15 @@
               <input type="hidden" name="provider" value="{{.Provider}}">
               <button type="submit" class="kebab-item">{{if .FullyAdded}}Crawl{{else}}Add + Crawl{{end}}</button>
             </form>
+            {{if gt .AddedCount 0}}
+            <form method="post" action="/crawl" data-async data-refresh
+                  data-confirm="Full re-crawl of {{.Provider}}? Every stored posting is re-fetched and re-written, not just new ones — one request per posting, so a large provider takes a long time. Use it after an adapter fix."
+                  data-done="Full re-crawl started for {{.Provider}}">
+              <input type="hidden" name="provider" value="{{.Provider}}">
+              <input type="hidden" name="refetch" value="1">
+              <button type="submit" class="kebab-item">Full re-crawl</button>
+            </form>
+            {{end}}
             <form method="post" action="/reindex" data-async data-done="Reindex queued">
               <button type="submit" class="kebab-item">Reindex now</button>
             </form>

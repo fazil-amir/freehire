@@ -350,7 +350,7 @@ func (s *Scheduler) runDue() {
 		}
 		s.store.markStarted(sch.ID, now)
 		id := sch.ID
-		started := s.runner.StartCrawl(sch.Provider, sch.ReindexAfter, func(err error) {
+		started := s.runner.StartCrawl(sch.Provider, sch.ReindexAfter, false, func(err error) {
 			if err != nil {
 				log.Printf("scheduler: %s failed: %v", id, err)
 			}

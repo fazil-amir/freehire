@@ -61,10 +61,10 @@ func TestScheduler_WaitsForAManualCrawlOfTheSameProvider(t *testing.T) {
 	sched, store, activity := newTestScheduler(t)
 
 	manualDone := make(chan struct{})
-	if !sched.runner.StartCrawl("acme", false, func(error) { close(manualDone) }) {
+	if !sched.runner.StartCrawl("acme", false, false, func(error) { close(manualDone) }) {
 		t.Fatal("manual crawl did not start")
 	}
-	if sched.runner.StartCrawl("acme", false, nil) {
+	if sched.runner.StartCrawl("acme", false, false, nil) {
 		t.Fatal("a second manual crawl of the same provider must be refused")
 	}
 

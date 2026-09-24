@@ -464,8 +464,9 @@ WITH oj AS MATERIALIZED (
       -- worth handing a crawler. Keep this in step with search.CategoryUnresolved
       -- (internal/search/search/document.go) — a company whose only open jobs are
       -- confirmed-technical-but-uncategorized would otherwise show 0 open jobs here
-      -- while those same jobs are live in search.
-      AND (category <> '' OR COALESCE(enrichment->>'category', '') NOT IN ('', 'other') OR is_tech IS TRUE)
+      -- while those same jobs are live in search. accept_non_tech mirrors its
+      -- classify.CatalogueTechOnly short-circuit: true counts every job.
+      AND (sqlc.arg(accept_non_tech)::bool OR category <> '' OR COALESCE(enrichment->>'category', '') NOT IN ('', 'other') OR is_tech IS TRUE)
 ),
 counts AS (
     SELECT company_slug, count(*) AS cnt FROM oj GROUP BY company_slug

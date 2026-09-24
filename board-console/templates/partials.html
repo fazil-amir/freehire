@@ -7,6 +7,12 @@
       <a href="/schedules" class="{{if eq .Active "schedules"}}active{{end}}">Schedules</a>
       <a href="/activity" class="{{if eq .Active "activity"}}active{{end}}">Activity</a>
     </nav>
+    <div class="topbar-end">
+    {{if techOnly}}
+    <span class="scope-pill" title="CATALOGUE_TECH_ONLY is on: crawls reject non-technical jobs and search hides them.">IT only</span>
+    {{else}}
+    <span class="scope-pill" title="CATALOGUE_TECH_ONLY=false: every job is crawled, stored and searchable. Enrichment, embeddings and the sitemap stay IT-only.">All jobs</span>
+    {{end}}
     <form method="post" action="/logout" class="logout-form">
       <button type="submit" aria-label="Log out" title="Log out">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -15,6 +21,7 @@
         </svg>
       </button>
     </form>
+    </div>
   </div>
 </header>
 {{end}}

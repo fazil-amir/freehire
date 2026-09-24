@@ -343,7 +343,8 @@ func handleCrawl(app *App) http.HandlerFunc {
 			http.Error(w, "provider required", http.StatusBadRequest)
 			return
 		}
-		if !app.runner.StartCrawl(provider, true, nil) {
+		refetchAll := r.FormValue("refetch") == "1"
+		if !app.runner.StartCrawl(provider, true, refetchAll, nil) {
 			if isFetch(r) {
 				actionError(w, http.StatusConflict, provider+" is already being crawled — see Activity.")
 				return
@@ -361,6 +362,21 @@ func handleReindexNow(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		app.runner.queueReindex()
 		actionDone(w, r, "/")
+	}
+}
+
+// handleCompanyRefresh is the "Recount companies" button: company job
+// counts and facets, then company search. Refused with a 409 while one is
+// already running.
+func handleCompanyRefresh(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !app.runner.StartCompanyRefresh() {
+			if isFetch(r) {
+				actionError(w, http.StatusConflict, "A company recount is already running.")
+				return
+			}
+		}
+		actionDone(w, r, "/activity")
 	}
 }
 
@@ -462,7 +478,7 @@ func handleNewProvider(app *App) http.HandlerFunc {
 		if form.CrawlNow {
 			// Already crawling (a click on its row a moment ago): that crawl
 			// covers the row just added, so there is nothing to start.
-			app.runner.StartCrawl(form.Provider, true, nil)
+			app.runner.StartCrawl(form.Provider, true, false, nil)
 		}
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 	}

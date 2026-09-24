@@ -111,6 +111,17 @@ board-console/
   extra run right after, never a stacked second one. Adding a new
   subprocess action means deciding which of these two shapes it needs, not
   reaching for a third pattern.
+- **Subprocesses inherit board-console's environment**, `CATALOGUE_TECH_ONLY`
+  included, so docker-compose must give board-console the SAME value as the
+  app (both read `${CATALOGUE_TECH_ONLY:-false}`). A crawl that disagrees
+  with the site about the catalogue's scope stores or drops the wrong jobs.
+  The top-bar badge (`scope.go`) mirrors freehire's parsing rule.
+- **Catalogue-wide Meilisearch rebuilds share `Runner.heavyMu`** (jobs
+  reindex, reindex-companies). freehire guards them with an advisory lock
+  that makes the loser SKIP and exit 0, so without the mutex a company
+  refresh during a reindex would silently do nothing.
+- **`ActivityLog.List()` returns snapshot copies.** Running Runs are written
+  by their subprocess goroutine; never hand a live `*Run` to a page.
 - **Every page's "added" figure goes through `resolveAddedCounts` in
   `db.go`.** It reads Postgres when reachable and falls back to the CSV's
   frozen `added` column (with a banner) when it isn't. A new page or query

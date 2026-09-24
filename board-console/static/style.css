@@ -35,6 +35,8 @@
   --pill-reindex-muted: rgba(94, 234, 212, 0.12);
   --pill-cleanup: #f0abfc;
   --pill-cleanup-muted: rgba(240, 171, 252, 0.12);
+  --pill-companies: #fcd34d;
+  --pill-companies-muted: rgba(252, 211, 77, 0.12);
 
   --radius-sm: 6px;
   --radius-md: 10px;
@@ -97,7 +99,16 @@ h1, h2 { font-weight: 600; }
    read heavier than the old 14px/600 did. */
 .topbar .brand { font-size: 16px; font-weight: 800; color: var(--text); letter-spacing: 1px; }
 .topbar nav { display: flex; gap: 4px; }
-.topbar .logout-form { justify-self: end; }
+.topbar .topbar-end { justify-self: end; display: flex; align-items: center; gap: 12px; }
+.scope-pill {
+  font-size: 12px;
+  font-weight: 500;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+  cursor: help;
+}
 .topbar nav a {
   color: var(--text-muted);
   text-decoration: none;
@@ -404,6 +415,7 @@ table.catalog-table tbody tr:hover { background: var(--surface-raised); }
 .pill-add-boards { background: var(--pill-add-muted); color: var(--pill-add); }
 .pill-reindex { background: var(--pill-reindex-muted); color: var(--pill-reindex); }
 .pill-close-chronic-boards { background: var(--pill-cleanup-muted); color: var(--pill-cleanup); }
+.pill-recount-companies, .pill-reindex-companies { background: var(--pill-companies-muted); color: var(--pill-companies); }
 
 /* Activity's Cleanup tab: last/next run in the toolbar's end slot. */
 .cleanup-status { display: flex; align-items: center; gap: 8px; font-size: 13px; white-space: nowrap; }

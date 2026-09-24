@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/strelov1/freehire/internal/dict/classify"
 	"github.com/strelov1/freehire/internal/job/jobview"
 	"github.com/strelov1/freehire/internal/platform/db"
 )
@@ -110,6 +111,18 @@ func TestCategoryUnresolved(t *testing.T) {
 				t.Errorf("CategoryUnresolved(%+v) = %v, want %v", tt.job, got, tt.want)
 			}
 		})
+	}
+}
+
+// With the catalogue opened to every posting, the undifferentiated bulk is what was asked
+// for: nothing is excluded on category grounds.
+func TestCategoryUnresolved_CatalogueOpen(t *testing.T) {
+	orig := classify.CatalogueTechOnly
+	classify.CatalogueTechOnly = func() bool { return false }
+	t.Cleanup(func() { classify.CatalogueTechOnly = orig })
+
+	if CategoryUnresolved(db.Job{IsTech: pgtype.Bool{Valid: true, Bool: false}}) {
+		t.Error("an uncategorized non-tech job was excluded with CATALOGUE_TECH_ONLY=false")
 	}
 }
 

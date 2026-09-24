@@ -136,8 +136,8 @@ func (a *ActivityLog) StartLabeled(action, provider, label string) *Run {
 // visible the instant an action is requested, even if it then has to wait
 // for a concurrency slot (see Runner's ingest semaphore). Call MarkRunning
 // once that slot is actually acquired.
-func (a *ActivityLog) StartQueued(action, provider string) *Run {
-	return a.start(action, provider, "", StatusQueued)
+func (a *ActivityLog) StartQueued(action, provider, label string) *Run {
+	return a.start(action, provider, label, StatusQueued)
 }
 
 func (a *ActivityLog) start(action, provider, label string, status RunStatus) *Run {
@@ -271,12 +271,19 @@ func (a *ActivityLog) maybeTrimLocked() {
 }
 
 // List returns runs newest-first.
+//
+// Each entry is a snapshot COPY taken under the lock, not the live Run: a
+// running Run keeps being written (output appended, status finished) by its
+// subprocess goroutine, and a page rendering the live struct meanwhile would
+// race it. The copy is cheap — Stdout/Stderr are strings, so only their
+// headers are copied, never the bytes.
 func (a *ActivityLog) List() []*Run {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	out := make([]*Run, len(a.runs))
 	for i, r := range a.runs {
-		out[len(a.runs)-1-i] = r
+		snapshot := *r
+		out[len(a.runs)-1-i] = &snapshot
 	}
 	return out
 }

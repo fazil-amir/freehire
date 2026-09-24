@@ -56,6 +56,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/strelov1/freehire/internal/dict/classify"
 	"github.com/strelov1/freehire/internal/dict/skilltag"
 	"github.com/strelov1/freehire/internal/platform/db"
 	"github.com/strelov1/freehire/internal/platform/worker"
@@ -148,6 +149,12 @@ func run() int {
 	// deletes nothing, so it is reversible by re-adding the board — but it is still the
 	// step that stops a board being crawled, so it prints the whole count before acting.
 	if *retire {
+		// Retiring a board for posting nothing technical stops its crawl — the opposite of
+		// what a catalogue accepting every posting asked for.
+		if !classify.CatalogueTechOnly() {
+			log.Print("prune: --retire refused — CATALOGUE_TECH_ONLY=false accepts non-technical boards")
+			return 1
+		}
 		list, withheld, err := boardsToRetire(ctx, q, brd)
 		if err != nil {
 			log.Printf("prune: board evidence: %v", err)

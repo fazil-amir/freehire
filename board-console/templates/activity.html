@@ -13,10 +13,10 @@
     <div>
       <h1>Activity</h1>
       {{if .CleanupView}}
-      <p class="page-subtitle" title="Closed jobs drop out of search; nothing is deleted, and a board that comes back reopens its jobs on the next crawl.">
-        Runs daily. Closes jobs from boards dead for 60 days or empty for 30 — nothing is deleted.</p>
+      <p class="page-subtitle" title="Closed jobs drop out of search; nothing is deleted, and a board that comes back reopens its jobs on the next crawl. Company job counts and company search are refreshed after each run.">
+        Runs daily. Closes jobs from boards dead for 60 days or empty for 30, then recounts companies.</p>
       {{else}}
-      <p class="page-subtitle">Crawls, board additions and reindexes, newest first — click a run for its output.</p>
+      <p class="page-subtitle">Crawls, board additions, reindexes and company recounts, newest first — click a run for its output.</p>
       {{end}}
     </div>
     <div class="page-actions">
@@ -31,6 +31,11 @@
         <button type="submit" class="btn btn-primary">Run now</button>
       </form>
       {{else}}
+      <form method="post" action="/companies/refresh" data-async data-refresh
+            data-done="Company recount started — job counts, then company search">
+        <button type="submit" class="btn btn-secondary"
+                title="Recompute every company's open-job count and facets, then rebuild company search">Recount companies</button>
+      </form>
       <form method="post" action="/reindex" data-async data-refresh
             data-done="Reindex started — rebuilding the search index from everything stored">
         <button type="submit" class="btn btn-primary">Reindex now</button>
@@ -59,6 +64,8 @@
           <option value="add-boards" {{if eq .ActionFilter "add-boards"}}selected{{end}}>add-boards</option>
           <option value="ingest" {{if eq .ActionFilter "ingest"}}selected{{end}}>ingest</option>
           <option value="reindex" {{if eq .ActionFilter "reindex"}}selected{{end}}>reindex</option>
+          <option value="recount-companies" {{if eq .ActionFilter "recount-companies"}}selected{{end}}>recount-companies</option>
+          <option value="reindex-companies" {{if eq .ActionFilter "reindex-companies"}}selected{{end}}>reindex-companies</option>
         </select>
         {{end}}
       </div>

@@ -13,6 +13,7 @@ import (
 	"context"
 	"log"
 
+	"github.com/strelov1/freehire/internal/dict/classify"
 	"github.com/strelov1/freehire/internal/dict/industrytag"
 	"github.com/strelov1/freehire/internal/platform/db"
 	"github.com/strelov1/freehire/internal/platform/worker"
@@ -34,6 +35,7 @@ func run() int {
 	updated, err := db.New(pool).RefreshCompanyFacets(ctx, db.RefreshCompanyFacetsParams{
 		MappingDomains:    mappingDomains,
 		MappingIndustries: mappingIndustries,
+		AcceptNonTech:     !classify.CatalogueTechOnly(),
 	})
 	if err != nil {
 		log.Printf("recount-companies: %v", err)

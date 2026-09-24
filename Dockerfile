@@ -20,7 +20,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/hire ./cmd/server
  && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/ \
       ./cmd/ingest ./cmd/enrich ./cmd/reindex ./cmd/tg-ingest ./cmd/tg-extract \
       ./cmd/backfill-derive ./cmd/liveness ./cmd/notify ./cmd/import-collections \
-      ./cmd/recount-companies ./cmd/migrate ./cmd/bulk-add-boards ./cmd/add-board ./cmd/close-chronic-boards
+      ./cmd/recount-companies ./cmd/migrate ./cmd/bulk-add-boards ./cmd/add-board ./cmd/close-chronic-boards ./cmd/reindex-companies
 
 # --- typst stage: fetch the pinned, statically-linked typst binary used to render CV
 # PDFs (internal/cv). The musl build is fully static, so it runs on distroless/static;
@@ -54,7 +54,8 @@ RUN BUILD_ID="$(find . -type f -not -path './data/*' | sort | xargs sha256sum | 
       -o /out/board-console .
 
 # --- board-console runtime stage: reuses the freehire binaries the `build` stage
-# above already compiled (bulk-add-boards, ingest, reindex, close-chronic-boards) rather than recompiling
+# above already compiled (bulk-add-boards, ingest, reindex, close-chronic-boards, recount-companies,
+# reindex-companies) rather than recompiling
 # them — board-console runs them as local subprocesses inside its own container,
 # never via `docker exec` into the app container. ---
 FROM debian:stable-slim AS board-console
@@ -65,7 +66,8 @@ RUN apt-get update \
  && useradd --system --uid 65532 --gid nonroot --home-dir /app nonroot
 WORKDIR /app
 COPY --from=board-console-build /out/board-console /app/board-console
-COPY --from=build /out/ingest /out/reindex /out/bulk-add-boards /out/add-board /out/close-chronic-boards /app/
+COPY --from=build /out/ingest /out/reindex /out/bulk-add-boards /out/add-board /out/close-chronic-boards \
+     /out/recount-companies /out/reindex-companies /app/
 EXPOSE 8091
 USER nonroot:nonroot
 ENTRYPOINT ["/app/board-console"]
