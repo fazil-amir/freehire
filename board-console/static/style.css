@@ -57,7 +57,7 @@
   --z-dropdown: 1000;
   --z-toast: 1100;
 
-  --sidebar-width: 240px;
+  --sidebar-width: 280px;
 
   --duration-fast: 150ms;
   --duration-normal: 250ms;
@@ -140,6 +140,80 @@ h1, h2 { font-weight: 600; }
 .side-nav a.active { color: var(--text); background: var(--surface-raised); }
 .side-nav a.active svg { color: var(--accent); opacity: 1; }
 .sidebar-end { margin-top: auto; display: flex; flex-direction: column; gap: 10px; }
+
+/* The Server card: disk, memory, CPU and the build cache, polled. */
+.server-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 6px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.server-card[hidden] { display: none; }
+.server-head { display: flex; align-items: center; justify-content: space-between; }
+.server-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.server-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.server-live::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 3px var(--success-muted);
+}
+.server-live.stale::before { background: var(--text-faint); box-shadow: none; }
+.meter { display: flex; flex-direction: column; gap: 6px; }
+.meter[hidden], .server-cache[hidden], .meter-note[hidden], .server-cache-off[hidden] { display: none; }
+.meter-row { display: flex; align-items: baseline; gap: 8px; font-size: 12px; }
+.meter-label { color: var(--text); font-weight: 500; }
+.meter-detail {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.meter-pct { margin-left: auto; color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.meter-track { height: 4px; border-radius: 999px; background: var(--surface-raised); overflow: hidden; }
+.meter-bar {
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.6s var(--ease-out), background var(--duration-fast) var(--ease-out);
+}
+.meter.warn .meter-bar { background: var(--warning); }
+.meter.crit .meter-bar { background: var(--danger); }
+.meter.warn .meter-pct { color: var(--warning); }
+.meter.crit .meter-pct { color: var(--danger); }
+.meter-note { margin: 0; font-size: 11px; line-height: 1.4; color: var(--warning); }
+.server-cache {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.server-sub { margin: 0; font-size: 11px; line-height: 1.4; color: var(--text-faint); }
+.server-prune { margin-top: 4px; width: 100%; }
 .logout-form { margin: 0; }
 .brand-text { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
 .scope-pill {
@@ -152,7 +226,12 @@ h1, h2 { font-weight: 600; }
   cursor: help;
 }
 
-main { padding: 36px 40px 40px; }
+main {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  padding: 36px 40px 24px;
+}
 .sidebar ~ main { margin-left: var(--sidebar-width); }
 
 /* Narrow screens: the sidebar folds into a bar across the top. */
@@ -175,7 +254,7 @@ main { padding: 36px 40px 40px; }
   .sidebar-end { margin: 0 0 0 auto; flex-direction: row; align-items: center; }
   .sidebar ~ main { margin-left: 0; }
   .brand-text { flex-direction: row; align-items: center; }
-  .build-info { display: none; }
+  .server-card { display: none !important; }
   main { padding: 24px 16px; }
 }
 
@@ -471,6 +550,7 @@ table.catalog-table tbody tr.run-detail:hover { background: none; }
 .pill-close-chronic-boards { background: var(--pill-cleanup-muted); color: var(--pill-cleanup); }
 .pill-recount-companies, .pill-reindex-companies { background: var(--pill-companies-muted); color: var(--pill-companies); }
 .pill-remove-boards { background: var(--danger-muted); color: var(--danger); }
+.pill-prune-build-cache { background: var(--warning-muted); color: var(--warning); }
 
 /* Activity's Cleanup tab: last/next run in the toolbar's end slot. */
 .cleanup-status { display: flex; align-items: center; gap: 8px; font-size: 13px; white-space: nowrap; }
@@ -979,11 +1059,17 @@ code {
   color: var(--text-muted);
 }
 
-/* Build ID and date, at the foot of the sidebar. */
-.build-info {
-  padding: 4px 12px 0;
+/* Which build is running, closing every page at its bottom right: main is
+   a column at least a screen tall, so the footer's auto top margin pushes
+   it down on a short page and it simply follows the content on a long one
+   — never over it. */
+.page-footer {
+  margin-top: auto;
+  padding-top: 32px;
+  align-self: flex-end;
   font-size: 11px;
   line-height: 1.6;
   color: var(--text-faint);
 }
-.build-info code { background: var(--surface); color: var(--text-muted); font-size: 11px; }
+.page-footer code { background: var(--surface); color: var(--text-muted); font-size: 11px; }
+.page-footer-sep { margin: 0 6px; }

@@ -283,6 +283,16 @@ and CSV/schedule management work regardless.
   apply). One delegated click listener (`app.js`) opens/closes every
   menu on the page — clicking a toggle opens its own menu and closes every
   other one; clicking anywhere else closes all of them.
+- **The sidebar's Server card** shows the host's disk, memory and CPU
+  (from `/proc` and `statfs` — inside Docker these describe the host), polled
+  every 5s from `GET /system/stats`, amber from 75% and red from 90%. The Disk
+  meter warns when free space is below `REINDEX_MIN_FREE_GB`, since a reindex
+  would refuse to run. It also shows Docker's build cache — the usual reason a
+  small catalogue fills the disk — with a **Clear build cache** button
+  (`docker builder prune -af`, recorded as an Activity job). Docker is reached
+  only through the compose file's `docker-proxy` (tecnativa/docker-socket-proxy),
+  which allows just `/system/df` and `/build`; board-console never holds the raw
+  socket. `DOCKER_PROXY_URL` empty turns the build-cache part off.
 - **Remove provider** retires every live board of the provider through
   `add-board --retire` (rows kept, jobs untouched) and deletes its
   schedule. Once every board is retired it also purges the provider's runs

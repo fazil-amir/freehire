@@ -14,7 +14,7 @@ import (
 // interleaved with everything else.
 type Job struct {
 	Key       string // "j<id>", or "r<run id>" for a run recorded before jobs existed
-	Kind      string // "Crawl", "Full re-crawl", "Cleanup", "Cleanup preview", "Reindex", "Recount companies", "Remove provider"
+	Kind      string // "Crawl", "Full re-crawl", "Cleanup", "Cleanup preview", "Reindex", "Recount companies", "Remove provider", "Clear build cache"
 	Provider  string // empty for catalogue-wide jobs
 	Steps     []*JobStep
 	StartedAt time.Time
@@ -196,6 +196,8 @@ func jobKind(steps []*JobStep) string {
 		return "Recount companies"
 	case has["reindex"] != nil:
 		return "Reindex"
+	case has["prune-build-cache"] != nil:
+		return "Clear build cache"
 	}
 	return steps[0].Action
 }

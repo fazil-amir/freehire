@@ -15,6 +15,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 )
 
 // App wires together every piece the HTTP handlers need.
@@ -28,6 +29,9 @@ type App struct {
 	explainer *Explainer
 	sessions  *SessionStore
 	db        *DBStore // nil when DATABASE_URL is unset or the open failed — every reader falls back gracefully
+	docker    *DockerProxy
+	cpu       *CPUSampler
+	dataDir   string // where the Disk meter measures when MEILI_DATA_DIR is not mounted
 }
 
 func main() {
@@ -81,6 +85,8 @@ func main() {
 
 	stop := make(chan struct{})
 	go scheduler.Run(stop)
+	cpu := &CPUSampler{}
+	go cpu.Run(5*time.Second, stop)
 
 	app := &App{
 		tmpl:      LoadTemplates(),
@@ -92,6 +98,9 @@ func main() {
 		explainer: NewExplainerFromEnv(),
 		sessions:  NewSessionStore(),
 		db:        dbStore,
+		docker:    NewDockerProxyFromEnv(),
+		cpu:       cpu,
+		dataDir:   dataDir,
 	}
 
 	mux := http.NewServeMux()
@@ -118,6 +127,8 @@ func main() {
 	mux.HandleFunc("POST /schedules/delete", requireAuth(app.sessions, handleScheduleDelete(app)))
 	mux.HandleFunc("POST /schedules/toggle", requireAuth(app.sessions, handleScheduleToggle(app)))
 
+	mux.HandleFunc("GET /system/stats", requireAuth(app.sessions, handleSystemStats(app)))
+	mux.HandleFunc("POST /system/build-cache/prune", requireAuth(app.sessions, handleBuildCachePrune(app)))
 	mux.HandleFunc("GET /activity", requireAuth(app.sessions, handleActivity(app)))
 	mux.HandleFunc("GET /activity/status", requireAuth(app.sessions, handleActivityStatus(app)))
 	mux.HandleFunc("POST /activity/explain", requireAuth(app.sessions, handleExplain(app)))

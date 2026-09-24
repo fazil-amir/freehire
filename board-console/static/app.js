@@ -963,3 +963,107 @@ function showScheduleError(dialog, message) {
   window.addEventListener("scroll", closeAll, true);
   window.addEventListener("resize", closeAll);
 })();
+
+// The sidebar's Server card (templates/partials.html): disk, memory, CPU
+// and Docker's build cache from /system/stats, every 5 seconds while the
+// tab is visible. A meter with no reading stays hidden; a failed poll greys
+// the "live" dot, so a number is never shown as current when it is not.
+(function () {
+  var card = document.querySelector("[data-server-card]");
+  if (!card) return;
+  var live = card.querySelector("[data-server-live]");
+  var pruneBtn = card.querySelector("[data-prune]");
+  var GB = 1024 * 1024 * 1024;
+  var timer = null;
+
+  function size(n) {
+    return n >= GB ? (n / GB).toFixed(1) + " GB" : Math.round(n / 1024 / 1024) + " MB";
+  }
+  function meter(key, pct, detail, note) {
+    var m = card.querySelector('[data-meter="' + key + '"]');
+    if (pct == null) { m.hidden = true; return; }
+    m.hidden = false;
+    var p = Math.max(0, Math.min(100, pct));
+    m.classList.toggle("warn", p >= 75 && p < 90);
+    m.classList.toggle("crit", p >= 90);
+    m.querySelector("[data-pct]").textContent = Math.round(p) + "%";
+    m.querySelector("[data-detail]").textContent = detail;
+    m.querySelector("[data-bar]").style.width = p + "%";
+    var n = m.querySelector("[data-note]");
+    n.textContent = note || "";
+    n.hidden = !note;
+  }
+
+  function render(s) {
+    var d = s.disk;
+    meter("disk", d && d.total ? d.used / d.total * 100 : null,
+      d ? size(d.used) + " of " + size(d.total) : "",
+      d && s.reindexFloorGB && d.free < s.reindexFloorGB * GB
+        ? size(d.free) + " free — reindex needs " + s.reindexFloorGB + " GB" : "");
+    var m = s.mem;
+    meter("mem", m && m.total ? m.used / m.total * 100 : null, m ? size(m.used) + " of " + size(m.total) : "");
+    meter("cpu", s.cpu ? s.cpu.pct : null, s.cpu ? s.cpu.cores + (s.cpu.cores === 1 ? " core" : " cores") : "");
+
+    var cache = card.querySelector("[data-cache]");
+    var off = card.querySelector("[data-cache-off]");
+    if (s.buildCache) {
+      cache.hidden = false;
+      off.hidden = true;
+      card.querySelector("[data-cache-total]").textContent = size(s.buildCache.total);
+      var r = s.buildCache.reclaimable;
+      card.querySelector("[data-cache-sub]").textContent = r > 0 ? size(r) + " can be cleared" : "Nothing to clear";
+      if (!pruneBtn.dataset.busy) pruneBtn.disabled = r <= 0;
+    } else {
+      cache.hidden = true;
+      off.hidden = false;
+      off.textContent = s.docker ? "Build cache: Docker not reachable" : "Build cache: Docker not connected";
+      off.title = s.dockerError || "Set DOCKER_PROXY_URL (see docker-compose.yml) to show and clear it.";
+    }
+    card.hidden = false;
+  }
+
+  function poll() {
+    clearTimeout(timer);
+    if (document.hidden) return; // resumed by visibilitychange
+    fetch("/system/stats", { headers: { "X-Board-Console-Fetch": "1" } })
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(function (s) {
+        render(s);
+        live.classList.remove("stale");
+        live.textContent = "live";
+        live.title = "Updated every 5 seconds";
+      })
+      .catch(function () {
+        live.classList.add("stale");
+        live.textContent = "stale";
+        live.title = "Could not refresh — showing the last reading";
+      })
+      .finally(function () { timer = setTimeout(poll, 5000); });
+  }
+  document.addEventListener("visibilitychange", function () { if (!document.hidden) poll(); });
+  poll();
+
+  pruneBtn.addEventListener("click", function () {
+    confirmDialog("Deletes Docker's cached image build steps only. Containers, the images they run and all data are untouched; the next image build is just slower.",
+      { title: "Clear build cache?", confirmLabel: "Clear cache" })
+      .then(function (ok) {
+        if (!ok) return;
+        pruneBtn.dataset.busy = "1";
+        pruneBtn.disabled = true;
+        pruneBtn.textContent = "Clearing…";
+        return fetch("/system/build-cache/prune", { method: "POST", headers: { "X-Board-Console-Fetch": "1" } })
+          .then(function (r) {
+            return r.json().catch(function () { return {}; }).then(function (body) {
+              if (!r.ok) throw new Error(body.error || "Request failed (" + r.status + ").");
+              toast("Cleared " + (body.reclaimedText || "the build cache"));
+            });
+          })
+          .catch(function (err) { toast(err.message, true); })
+          .finally(function () {
+            delete pruneBtn.dataset.busy;
+            pruneBtn.textContent = "Clear build cache";
+            poll();
+          });
+      });
+  });
+})();

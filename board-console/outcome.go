@@ -31,6 +31,7 @@ var (
 	reindexDoneRe  = regexp.MustCompile(`reindex(?:-companies)? done: .*\bindexed=(\d+)`)
 	recountDoneRe  = regexp.MustCompile(`recount-companies done: companies updated=(\d+)`)
 	removeDoneRe   = regexp.MustCompile(`remove-boards: done\. retired=(\d+) failed=(\d+) schedules_deleted=(\d+)`)
+	pruneDoneRe    = regexp.MustCompile(`prune-build-cache: reclaimed=(\d+)`)
 	cleanupJobsRe  = regexp.MustCompile(`close-chronic-boards: \d+ .*?(would close|closed) (\d+) job\(s\) total`)
 	logTimestampRe = regexp.MustCompile(`^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2} `)
 )
@@ -106,6 +107,10 @@ func (r *Run) successSummary() string {
 	}
 	if m := lastMatch(reindexDoneRe, out); m != nil {
 		return thousands(atoi(m[1])) + " indexed"
+	}
+	if m := lastMatch(pruneDoneRe, out); m != nil {
+		n, _ := strconv.ParseUint(m[1], 10, 64)
+		return humanBytes(n) + " reclaimed"
 	}
 	if m := lastMatch(recountDoneRe, out); m != nil {
 		return plural(atoi(m[1]), "company", "companies") + " updated"

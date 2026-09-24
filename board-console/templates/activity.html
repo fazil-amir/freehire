@@ -70,6 +70,7 @@
           <option value="recount-companies" {{if eq .ActionFilter "recount-companies"}}selected{{end}}>recount-companies</option>
           <option value="reindex-companies" {{if eq .ActionFilter "reindex-companies"}}selected{{end}}>reindex-companies</option>
           <option value="remove-boards" {{if eq .ActionFilter "remove-boards"}}selected{{end}}>remove-boards</option>
+          <option value="prune-build-cache" {{if eq .ActionFilter "prune-build-cache"}}selected{{end}}>prune-build-cache</option>
         </select>
         {{end}}
       </div>
@@ -167,6 +168,7 @@ error: {{.Err}}{{end}}</pre>
     </div>
     </div>
   </div>
+  {{template "page-footer"}}
 </main>
 <script src="/static/app.js"></script>
 </body>

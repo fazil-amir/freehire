@@ -187,6 +187,22 @@ services:
     command: >
       sh -c "chgrp -R 65532 /data && chmod -R g+rwX,o+rX /data && chmod g+s /data"
 
+  # board-console's only way to Docker: the Server card reads the build cache's
+  # size and "Clear build cache" prunes it. The raw socket is full control of the
+  # host, so board-console never gets it — this proxy lets through only what the
+  # sections below allow: SYSTEM (GET /system/df) and BUILD with POST (/build/prune;
+  # /build itself could also build an image, but nothing here can run a container,
+  # exec, or touch volumes or networks). No published port: reachable from the
+  # compose network only.
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:v0.4.2
+    environment:
+      SYSTEM: 1
+      BUILD: 1
+      POST: 1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
   board-console:
     build:
       context: .
@@ -232,6 +248,9 @@ services:
       OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
       OPENAI_MODEL: "${OPENAI_MODEL:-}"
       OPENAI_BASE_URL: "${OPENAI_BASE_URL:-}"
+      # The Server card's build-cache figure and its Clear button (see docker-proxy).
+      # Set it empty in .env to turn both off.
+      DOCKER_PROXY_URL: "${DOCKER_PROXY_URL-http://docker-proxy:2375}"
     ports:
       # Host port 8040 (8091 clashes with Beszel). Override with BOARD_CONSOLE_HOST_PORT.
       - "${BOARD_CONSOLE_HOST_PORT:-8040}:8091"
