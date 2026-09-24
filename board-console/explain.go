@@ -224,3 +224,41 @@ func capLine(s string) string {
 	}
 	return s[:explainLineCap] + " [...]"
 }
+
+// explainSection is one labelled part of an answer ("Why", ...).
+type explainSection struct {
+	Label string
+	Body  string
+}
+
+// explainLabels are the section headings the system prompt asks for.
+var explainLabels = []string{"What happened", "Why", "What to do"}
+
+// explainSections splits an answer at the labels explainSystemPrompt asks
+// for, so the page can set them as headings. An answer that ignored the
+// format comes back as one unlabelled section, never lost.
+func explainSections(answer string) []explainSection {
+	var out []explainSection
+	for _, line := range strings.Split(answer, "\n") {
+		trimmed := strings.TrimSpace(line)
+		label := ""
+		for _, l := range explainLabels {
+			if strings.HasPrefix(strings.ToLower(trimmed), strings.ToLower(l)+":") {
+				label = l
+				trimmed = strings.TrimSpace(trimmed[len(l)+1:])
+				break
+			}
+		}
+		switch {
+		case label != "":
+			out = append(out, explainSection{Label: label, Body: trimmed})
+		case trimmed == "":
+			continue
+		case len(out) == 0:
+			out = append(out, explainSection{Body: trimmed})
+		default:
+			out[len(out)-1].Body = strings.TrimSpace(out[len(out)-1].Body + "\n" + trimmed)
+		}
+	}
+	return out
+}

@@ -246,7 +246,12 @@ func handleExplain(app *App) http.HandlerFunc {
 			actionError(w, http.StatusBadGateway, err.Error())
 			return
 		}
+		html, err := app.tmpl.Fragment("explain-answer", answer)
+		if err != nil {
+			actionError(w, http.StatusInternalServerError, "Could not render the explanation.")
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"explanation": answer})
+		_ = json.NewEncoder(w).Encode(map[string]string{"explanation": answer, "html": html})
 	}
 }

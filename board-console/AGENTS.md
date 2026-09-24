@@ -173,8 +173,11 @@ board-console/
 - **CSS is one file, one fixed dark palette** (`static/style.css`) — no
   light/dark media query, unlike freehire's own design system. The tokens
   at the top (`--bg`, `--surface`, `--accent`, ...) are board-console's
-  own identity (neutral greys, colour only for status and the Activity
-  action pills), deliberately not a copy of freehire's brand green; keep
+  own identity (graphite surfaces #242529/#2C2D33/#373841 with one lavender
+  accent #A3A7F6, taken from a dark dashboard design; colour otherwise only
+  for status and the Activity action pills), deliberately not a copy of
+  freehire's brand green. Keep small text at 4.5:1 or better — `--text-faint`
+  was lifted from the design's #858C95 for exactly that; keep
   new component styles referencing those custom properties rather than
   literal colors.
 - **Runtime state never goes through git.** `activity.jsonl`,

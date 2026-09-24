@@ -139,17 +139,14 @@ document.addEventListener("click", function (e) {
     .then(function (r) {
       return r.json().then(function (data) {
         if (!r.ok) throw new Error(data.error || "Could not explain this run.");
-        return data.explanation;
+        return data.html;
       });
     })
-    .then(function (text) {
+    .then(function (html) {
       // Look the box up again: a live refresh may have replaced it meanwhile.
+      // The HTML is the server's own template output (escaped there).
       var box = document.querySelector('[data-explain-for="' + id + '"]');
-      if (!box) return;
-      var answer = document.createElement("div");
-      answer.className = "explain-answer";
-      answer.textContent = text;
-      box.replaceChildren(answer);
+      if (box) box.innerHTML = html;
     })
     .catch(function (err) {
       toast(err.message, true);

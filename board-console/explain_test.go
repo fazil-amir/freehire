@@ -111,3 +111,24 @@ func TestLogTail_KeepsTheEndWithinBudget(t *testing.T) {
 		t.Fatal("an over-long line must be capped")
 	}
 }
+
+func TestExplainSections(t *testing.T) {
+	got := explainSections("What happened: 4278 jobs ingested.\n\nWhy: two boards returned HTML.\nSee the keka lines.\nWhat to do: Nothing — this is expected.")
+	want := []explainSection{
+		{"What happened", "4278 jobs ingested."},
+		{"Why", "two boards returned HTML.\nSee the keka lines."},
+		{"What to do", "Nothing — this is expected."},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d sections: %+v", len(got), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("section %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+	// An answer that ignored the format is kept whole, never dropped.
+	if s := explainSections("Just a sentence."); len(s) != 1 || s[0].Label != "" || s[0].Body != "Just a sentence." {
+		t.Fatalf("unformatted answer: %+v", s)
+	}
+}

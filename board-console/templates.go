@@ -5,6 +5,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -26,9 +27,10 @@ func LoadTemplates() *Templates {
 		"sub": func(a, b int) int { return a - b },
 		// iso is a <time datetime> value: the server runs in UTC, so app.js
 		// re-renders every <time data-local> in the viewer's own timezone.
-		"iso":      func(t time.Time) string { return t.UTC().Format(time.RFC3339) },
-		"buildID":  func() string { return buildID },
-		"techOnly": catalogueTechOnly,
+		"iso":             func(t time.Time) string { return t.UTC().Format(time.RFC3339) },
+		"buildID":         func() string { return buildID },
+		"techOnly":        catalogueTechOnly,
+		"explainSections": explainSections,
 		"buildDate": func() *time.Time {
 			if t := buildDate(); !t.IsZero() {
 				return &t
@@ -49,4 +51,14 @@ func (t *Templates) Render(w http.ResponseWriter, name string, data any) {
 		log.Printf("render %s: %v", name, err)
 		http.Error(w, "render error", http.StatusInternalServerError)
 	}
+}
+
+// Fragment renders one named template to a string — for a JSON endpoint
+// that returns a piece of the page (see handleExplain).
+func (t *Templates) Fragment(name string, data any) (string, error) {
+	var b strings.Builder
+	if err := t.tmpl.ExecuteTemplate(&b, name, data); err != nil {
+		return "", err
+	}
+	return b.String(), nil
 }
