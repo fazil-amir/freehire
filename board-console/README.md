@@ -93,18 +93,13 @@ All of them live under `data/`, which is mounted as a volume in
 git-ignored: each environment (a laptop, the VPS) keeps its own run
 history, schedules and cleanup clock, and a fresh clone starts them empty.
 
-On a Linux host the container (uid 65532) must be able to write `data/`,
-while your own user must still be able to `git pull` the CSV. Once per
-clone:
-
-```bash
-sudo chown -R "$USER":65532 board-console/data
-sudo chmod -R g+rwX board-console/data
-sudo chmod g+s board-console/data   # new files inherit the group
-```
-
-(Docker Desktop on macOS does not enforce this, which is why it only bites
-on the server.)
+On a Linux host the container (uid 65532) must be able to write `data/`
+while your own user can still `git pull` the CSV. `make up` handles this:
+the one-shot `board-console-init` service (docker-compose.yml) gives `data/`
+the container's group with group write, before board-console starts, on
+every run — the owner is never changed, so git keeps working. Nothing to do
+by hand on a fresh server. (Docker Desktop on macOS never enforces these
+permissions, which is why the problem only ever showed up on the server.)
 
 ## Credentials
 

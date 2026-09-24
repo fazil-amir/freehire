@@ -174,11 +174,26 @@ services:
   # container (copied in at build time from the `build` stage above, not
   # recompiled) — never `docker exec` into the `app` container. See
   # board-console/README.md.
+  # One-shot, like minio-init: makes board-console/data writable by the
+  # board-console container (uid/gid 65532) while it stays owned by — and
+  # `git pull`-able for — whoever cloned the repo. Without it a fresh Linux
+  # server crashes board-console on start with "permission denied" (Docker
+  # Desktop on macOS never enforces this). It changes only the GROUP and group
+  # bits, never the owner; runs on every `make up` and is a no-op once set.
+  board-console-init:
+    image: alpine:3.20
+    volumes:
+      - ./board-console/data:/data
+    command: >
+      sh -c "chgrp -R 65532 /data && chmod -R g+rwX,o+rX /data && chmod g+s /data"
+
   board-console:
     build:
       context: .
       target: board-console
     depends_on:
+      board-console-init:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       redis:
@@ -214,8 +229,8 @@ services:
     volumes:
       # board-console's only persistent store, kept on the host across rebuilds. Only
       # combined_boards.csv is in git; activity/schedule/cleanup are per machine
-      # (git-ignored). On Linux the container (uid 65532) needs write access here —
-      # see board-console/README.md.
+      # (git-ignored). Write access for the container (uid 65532) is set up by
+      # board-console-init above.
       - ./board-console/data:/app/data
       # Read-only: only statfs'd by reindex's disk-guard (see MEILI_DATA_DIR),
       # never written — Meilisearch itself is the volume's only writer.

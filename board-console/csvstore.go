@@ -160,6 +160,13 @@ func (s *CSVStore) save() error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
+	// CreateTemp makes the file 0600, and the rename carries that over. This
+	// file is tracked in git, and on a server the container (uid 65532) writes
+	// it while the operator's own user runs `git pull` over it — which fails
+	// on a file it cannot read. It holds nothing secret, so make it readable.
+	if err := os.Chmod(tmpPath, 0o644); err != nil {
+		return err
+	}
 	return os.Rename(tmpPath, s.path)
 }
 
