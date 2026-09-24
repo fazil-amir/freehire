@@ -232,6 +232,17 @@ input, select {
   height: 40px;
   transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
 }
+/* Our own chevron, inset like the text, instead of the native arrow that
+   sits against the edge. */
+select {
+  appearance: none;
+  padding-right: 34px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23979ea7' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px;
+  cursor: pointer;
+}
 input::placeholder { color: var(--text-faint); }
 input:focus-visible, select:focus-visible {
   outline: none;
@@ -543,6 +554,79 @@ dialog h2 { margin: 0; font-size: 18px; letter-spacing: -0.01em; }
   background: rgba(30, 31, 35, 0.5);
   border-radius: 0 0 var(--radius-xl) var(--radius-xl);
 }
+.schedule-times { display: flex; flex-direction: column; gap: 8px; }
+.schedule-times-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.field-label { font-size: 13px; font-weight: 500; color: var(--text-muted); }
+.schedule-times .field-hint strong { color: var(--text-muted); font-weight: 500; }
+.time-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.time-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg);
+}
+.time-row + .time-row { border-top: 1px solid var(--border); }
+.time-index {
+  width: 22px;
+  flex: none;
+  font-size: 12px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.time-row select { width: 84px; height: 34px; background-color: var(--surface); }
+.time-sep { color: var(--text-muted); font-weight: 600; }
+.time-note {
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--text-faint);
+}
+.time-note:empty { display: none; }
+.time-row[data-state="free"] .time-note { color: var(--success); background: var(--success-muted); }
+.time-row[data-state="busy"] .time-note { color: var(--accent); background: var(--accent-muted); }
+.time-row[data-state="booked"] .time-note,
+.time-row[data-state="dup"] .time-note { color: var(--danger); background: var(--danger-muted); }
+.time-row[data-state="booked"] select { border-color: var(--danger); }
+.time-remove {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 12px;
+}
+.time-remove:hover { color: var(--danger); background: var(--danger-muted); }
+/* Keeps its place when hidden, so a lone row's note lines up with a list's. */
+.time-remove[hidden] { display: block; visibility: hidden; }
+.add-time {
+  padding: 9px 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+.add-time:hover { border-color: var(--accent); background: var(--accent-muted); }
 .confirm-message { margin: 0; font-size: 14px; line-height: 1.6; color: var(--text-muted); }
 .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 @media (max-width: 560px) { .field-grid { grid-template-columns: 1fr; } }
@@ -635,6 +719,132 @@ code {
 }
 .toast-error { border-left-color: var(--danger); }
 .toast-hide { opacity: 0; transform: translateY(4px); }
+
+/* --- schedules: the 24-hour plan (drawn by app.js drawTimeline) --- */
+.timeline-card { padding: 18px 20px 20px; margin-bottom: 20px; }
+.timeline-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.timeline-head h2 { margin: 0; font-size: 15px; }
+.timeline-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: none;
+  border: none;
+  color: var(--text);
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+.timeline-toggle .job-chevron { font-size: 18px; line-height: 1; margin-right: 0; color: var(--text-muted); }
+.timeline-summary { font-size: 12px; color: var(--text-muted); }
+.timeline-summary.over { color: var(--danger); }
+.timeline-card:not(.collapsed) .job-chevron { transform: rotate(90deg); color: var(--accent); }
+.timeline-card.collapsed .timeline,
+.timeline-card.collapsed .timeline-legend { display: none; }
+.timeline-card.collapsed .timeline-head { margin-bottom: 0; }
+.timeline-legend { display: flex; gap: 14px; font-size: 12px; color: var(--text-muted); }
+.timeline-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.lg { width: 12px; height: 8px; border-radius: 3px; display: inline-block; }
+.lg-1 { background: var(--accent); opacity: 0.5; }
+.lg-2 { background: var(--accent); }
+.lg-over { background: var(--danger); }
+
+.timeline { position: relative; --tl-label: 150px; }
+.tl-row { display: flex; align-items: center; min-height: 26px; }
+.tl-row + .tl-row { border-top: 1px dashed var(--border); }
+.tl-label {
+  width: var(--tl-label);
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text);
+  padding-right: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The load row is the plan's header: a subtle band, padded outward by
+   the same amount it is pulled out, so its track still lines up with the
+   rows below. */
+.tl-row.tl-load {
+  margin: 0 -10px 2px;
+  padding: 0 10px;
+  border-top: 0;
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+}
+.tl-load + .tl-row { border-top: 0; }
+.tl-load .tl-label { font-weight: 600; }
+/* Board Console's own daily job, noted under the plan: the timeline rows
+   are the providers only. */
+.tl-system {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.timeline-card.collapsed .tl-system { display: none; }
+.tl-tag {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--pill-cleanup-muted);
+  color: var(--pill-cleanup);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.tl-per { margin-left: 6px; color: var(--text-faint); font-size: 11px; }
+.tl-track { position: relative; flex: 1; height: 26px; }
+.tl-scale .tl-track { height: 18px; }
+.tl-tick { position: absolute; top: 0; transform: translateX(-50%); font-size: 11px; color: var(--text-faint); }
+.tl-tick:first-child { transform: none; }
+.tl-tick:last-child { transform: translateX(-100%); }
+/* Run and load blocks are squares: their width is one 15-minute slot
+   (set by app.js), their height follows it, capped so a wide screen does
+   not outgrow the row. */
+.tl-block,
+.tl-slot {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  max-width: 20px;
+  aspect-ratio: 1;
+  border-radius: 4px;
+  background: var(--accent);
+}
+/* app.js lowers a load slot's opacity when fewer crawls than the capacity
+   start there, so it deepens as it fills; past it, red. */
+.tl-slot.over { background: var(--danger); }
+.tl-now {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--tl-label) + (100% - var(--tl-label)) * var(--now));
+  width: 2px;
+  background: var(--warning);
+  border-radius: 2px;
+  pointer-events: none;
+}
+.tl-empty { margin: 10px 0 0; font-size: 13px; }
+/* The Times cell keeps the row's height: chips stay on one line and the
+   cell scrolls sideways when a schedule has more than fit. */
+.slot-times {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  font-variant-numeric: tabular-nums;
+  scrollbar-width: thin;
+}
+.time-chip {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  font-size: 12px;
+}
 
 /* --- schedules --- */
 .interval-row { display: flex; gap: 8px; }

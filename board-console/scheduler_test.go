@@ -11,10 +11,19 @@ import (
 // newTestScheduler wires a real Scheduler over temp stores and a fake
 // ingest that sleeps, for one already-added provider "acme".
 func newTestScheduler(t *testing.T) (*Scheduler, *ScheduleStore, *ActivityLog) {
+	return newTestSchedulerFor(t, "acme")
+}
+
+// newTestSchedulerFor is newTestScheduler with one due schedule per provider.
+func newTestSchedulerFor(t *testing.T, providers ...string) (*Scheduler, *ScheduleStore, *ActivityLog) {
 	t.Helper()
 	dir := t.TempDir()
 	csvPath := filepath.Join(dir, "combined_boards.csv")
-	if err := os.WriteFile(csvPath, []byte("id,provider,board,company,added\nx,acme,,Acme,true\n"), 0o644); err != nil {
+	rows := "id,provider,board,company,added\n"
+	for _, p := range providers {
+		rows += p + "," + p + ",," + p + ",true\n"
+	}
+	if err := os.WriteFile(csvPath, []byte(rows), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	ingest := filepath.Join(dir, "ingest.sh")
@@ -37,9 +46,12 @@ func newTestScheduler(t *testing.T) (*Scheduler, *ScheduleStore, *ActivityLog) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Add("acme", 2*time.Minute, false); err != nil {
-		t.Fatal(err)
+	for _, p := range providers {
+		if err := store.Add(p, []int{0}); err != nil {
+			t.Fatal(err)
+		}
 	}
+	forceDue(store) // a new schedule first runs at its NEXT slot; tests want it now
 	runner := NewRunner(csv, activity, nil, cleanup, Binaries{Ingest: ingest, CSVPath: csvPath})
 	return NewScheduler(store, runner), store, activity
 }
@@ -99,9 +111,7 @@ func TestScheduler_NeverOverlapsItselfAndStampsTheStart(t *testing.T) {
 	}
 
 	// Force it due again while the first run is still in flight.
-	store.mu.Lock()
-	store.schedules[0].LastRun = time.Now().Add(-time.Hour)
-	store.mu.Unlock()
+	forceDue(store)
 	sched.runDue()
 
 	deadline := time.Now().Add(5 * time.Second)
@@ -128,4 +138,52 @@ func TestScheduleStore_RunningOnDiskLoadsAsInterrupted(t *testing.T) {
 	if got := store.List()[0].LastStatus; got != "interrupted" {
 		t.Fatalf("want interrupted, got %q", got)
 	}
+}
+
+// forceDue makes every schedule's current slot unserved, as if it had
+// never run.
+func forceDue(store *ScheduleStore) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	for i := range store.schedules {
+		store.schedules[i].LastSlot = time.Time{}
+		store.schedules[i].LastCrawlEnd = time.Time{}
+	}
+}
+
+// Three schedules due at once with SCHEDULE_CAPACITY=2: two start, the
+// third stays due (queued) and starts on the first tick after one ends.
+func TestScheduler_QueuesRunsBeyondCapacity(t *testing.T) {
+	t.Setenv("SCHEDULE_CAPACITY", "2")
+	sched, store, _ := newTestSchedulerFor(t, "a", "b", "c")
+
+	sched.runDue()
+	running := 0
+	var queued Schedule
+	for _, s := range store.List() {
+		if s.LastStatus == "running" {
+			running++
+		} else {
+			queued = s
+		}
+	}
+	if running != 2 || sched.runner.CrawlCount() != 2 {
+		t.Fatalf("want 2 crawls started, got %d (in flight %d)", running, sched.runner.CrawlCount())
+	}
+	if !queued.Due(time.Now()) {
+		t.Fatal("the third schedule must stay due while it waits")
+	}
+
+	sched.runDue() // still full: nothing more starts
+	if s, _ := store.ByProvider(queued.Provider); s.LastStatus == "running" || sched.runner.Crawling(queued.Provider) {
+		t.Fatal("capacity reached: the queued schedule must not start")
+	}
+
+	waitFor(t, "a crawl to end", func() bool { return sched.runner.CrawlCount() < 2 })
+	sched.runDue()
+	waitFor(t, "the queued schedule to start", func() bool {
+		s, _ := store.ByProvider(queued.Provider)
+		return s.LastStatus == "running" || s.LastStatus == "success"
+	})
+	waitFor(t, "every crawl to end", func() bool { return sched.runner.CrawlCount() == 0 })
 }

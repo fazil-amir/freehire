@@ -322,6 +322,81 @@ func (a *ActivityLog) Get(id int) (*Run, bool) {
 	return nil, false
 }
 
+// PurgeProvider forgets every run of provider — in memory and in
+// activity.jsonl, which is rewritten without their lines — and returns the
+// purged run IDs. Runs with no provider (a reindex, a cleanup) are kept,
+// even one that served the provider's crawl alongside others. Used when a
+// provider is removed: nothing about it should linger in the log.
+func (a *ActivityLog) PurgeProvider(provider string) []int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	var purged []int
+	kept := a.runs[:0:0]
+	for _, r := range a.runs {
+		if r.Provider == provider {
+			purged = append(purged, r.ID)
+			continue
+		}
+		kept = append(kept, r)
+	}
+	a.runs = kept
+	if len(purged) == 0 || a.file == nil {
+		return purged
+	}
+	if err := a.rewriteWithoutLocked(provider); err != nil {
+		log.Printf("activity log: purge %s from file: %v", provider, err)
+	}
+	return purged
+}
+
+// rewriteWithoutLocked rewrites activity.jsonl without provider's lines,
+// through a temp file and a rename, then reopens it for append. Callers
+// must hold a.mu.
+func (a *ActivityLog) rewriteWithoutLocked(provider string) error {
+	data, err := os.ReadFile(a.path)
+	if err != nil {
+		return err
+	}
+	var out []byte
+	lines := 0
+	for _, line := range splitLines(data) {
+		var r struct{ Provider string }
+		if json.Unmarshal(line, &r) == nil && r.Provider == provider {
+			continue
+		}
+		out = append(append(out, line...), '\n')
+		lines++
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(a.path), "activity-*.tmp")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(out); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	a.file.Close()
+	if err := os.Rename(tmp.Name(), a.path); err != nil {
+		a.file = nil
+		return err
+	}
+	f, err := os.OpenFile(a.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		a.file = nil // persistLocked no-ops on a nil file rather than panicking
+		return err
+	}
+	a.file, a.lineCount = f, lines
+	return nil
+}
+
 // AnyRunning reports whether at least one run is still in progress — drives
 // whether the Activity page keeps polling.
 func (a *ActivityLog) AnyRunning() bool {

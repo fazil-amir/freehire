@@ -82,6 +82,15 @@ func (e *Explainer) Cached() map[int]string {
 	return out
 }
 
+// Forget drops the cached answers for runs that no longer exist.
+func (e *Explainer) Forget(ids []int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, id := range ids {
+		delete(e.cache, id)
+	}
+}
+
 // Explain returns the model's explanation of run. history is the same
 // provider's (or action's) recent runs, oldest context for patterns like a
 // board that has failed three times running.

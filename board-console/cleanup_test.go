@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -33,5 +35,19 @@ func TestCleanupNext(t *testing.T) {
 	want := time.Date(2026, 9, 24, 3, 0, 0, 0, time.UTC)
 	if got := cleanupNext(last, now); !got.Equal(want) {
 		t.Errorf("cleanupNext = %v, want %v", got, want)
+	}
+}
+
+func TestCleanupStore_EmptyFileIsAFreshStart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cleanup.json")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewCleanupStore(path)
+	if err != nil {
+		t.Fatalf("an empty cleanup.json must not stop the console: %v", err)
+	}
+	if s.State().LastRun.IsZero() {
+		t.Error("want a fresh clock, as for a missing file")
 	}
 }

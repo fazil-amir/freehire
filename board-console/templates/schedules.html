@@ -8,24 +8,48 @@
 {{template "nav" .}}
 <main>
   <div class="page-header">
-    <h1>Schedules</h1>
-    <button type="button" class="btn btn-primary" data-schedule-open>+ Add schedule</button>
+    <div>
+      <h1>Schedules</h1>
+      <p class="page-subtitle">Crawls run at the times you set. A time holding {{.Capacity}} runs is booked — extra runs wait for a free spot.</p>
+    </div>
+    <div class="page-actions">
+      <button type="button" class="btn btn-primary" data-schedule-open>+ Add schedule</button>
+    </div>
   </div>
 
   {{if .DBError}}<p class="banner-warning">{{.DBError}}</p>{{end}}
 
+  {{/* The planned day, drawn by app.js (drawTimeline) in the viewer's
+       timezone from the JSON below — re-rendered with the table. */}}
+  <section class="card timeline-card" data-live-region>
+    <div class="timeline-head">
+      <button type="button" class="timeline-toggle" data-timeline-toggle aria-expanded="true">
+        <span class="job-chevron" aria-hidden="true">›</span>
+        <h2>Today's plan</h2>
+        <span class="timeline-summary"></span>
+      </button>
+      <div class="timeline-legend">
+        <span><i class="lg lg-1"></i>1 crawl</span>
+        <span><i class="lg lg-2"></i>{{.Capacity}} — booked</span>
+        <span><i class="lg lg-over"></i>over — runs queue</span>
+      </div>
+    </div>
+    <div id="timeline" class="timeline"></div>
+    <p class="tl-system"><span class="tl-tag">System</span><span data-timeline-system></span></p>
+    <script type="application/json" id="timeline-data">{{.Timeline}}</script>
+  </section>
+
   <div class="table-card" data-live-region data-schedules>
     <table class="catalog-table">
       <colgroup>
-        <col style="width: 17%"><col style="width: 12%"><col style="width: 19%"><col style="width: 21%"><col style="width: 13%"><col style="width: 10%"><col style="width: 60px">
+        <col style="width: 16%"><col style="width: 32%"><col style="width: 17%"><col style="width: 17%"><col style="width: 10%"><col style="width: 60px">
       </colgroup>
       <thead>
         <tr>
           <th>Provider</th>
-          <th>Interval</th>
+          <th>Times</th>
           <th>Next run</th>
           <th>Last run</th>
-          <th>Reindex after</th>
           <th class="col-toggle">Enabled</th>
           <th class="col-actions"></th>
         </tr>
@@ -34,10 +58,11 @@
         {{range .Schedules}}
         <tr class="run-row" data-run-id="sched-{{.ID}}" {{if .Running}}data-running{{end}}>
           <td>{{.Provider}}</td>
-          <td><span class="pill">every {{.Interval}}</span></td>
+          <td><div class="slot-times">{{range .TodayTimes}}<time class="time-chip" datetime="{{iso .}}" data-local="hm">{{.UTC.Format "15:04"}}</time>{{end}}</div></td>
           <td>
             {{if not .Enabled}}<span class="badge badge-no">paused</span>
             {{else if .Running}}<span class="muted">after this run</span>
+            {{else if .Queued}}<span class="badge badge-queued" title="{{$.Capacity}} crawls are already running — it starts when one ends">queued</span>
             {{else if .NextRun.IsZero}}<span class="badge badge-running">due now</span>
             {{else}}<time datetime="{{iso .NextRun}}" data-local>{{.NextRun.UTC.Format "02/01/2006 - 15:04:05"}} UTC</time>{{end}}
           </td>
@@ -49,7 +74,6 @@
               <div class="cell-sub"><time datetime="{{iso $lc.At}}" data-local>{{$lc.At.UTC.Format "02/01/2006 - 15:04:05"}} UTC</time></div>
             {{end}}
           </td>
-          <td>{{if .ReindexAfter}}<span class="pill pill-reindex">reindex</span>{{else}}<span class="muted">—</span>{{end}}</td>
           <td class="col-toggle">
             <form method="post" action="/schedules/toggle" class="inline-form">
               <input type="hidden" name="id" value="{{.ID}}">
@@ -65,8 +89,7 @@
               <div class="kebab-menu" hidden>
                 <a class="kebab-item" href="/schedules?open=edit&id={{.ID}}"
                    data-schedule-open data-id="{{.ID}}" data-provider="{{.Provider}}"
-                   data-interval-value="{{.IntervalValue}}" data-interval-unit="{{.IntervalUnit}}"
-                   data-reindex-after="{{.ReindexAfter}}">Edit</a>
+                   data-times="{{joinInts .Times}}">Edit</a>
                 <form method="post" action="/schedules/delete" data-async data-refresh
                       data-confirm-title="Delete schedule?"
                       data-confirm="{{.Provider}} will no longer be crawled automatically. Its jobs and past runs stay; you can add a schedule again any time."
@@ -80,7 +103,7 @@
           </td>
         </tr>
         <tr class="run-detail" id="detail-sched-{{.ID}}" hidden>
-          <td colspan="7">
+          <td colspan="6">
             {{with .LatestRun}}
             <div class="run-detail-head">
               Latest crawl of {{.Provider}}: <span class="pill pill-{{.Action}}">{{.Action}}</span>
@@ -105,7 +128,7 @@ error: {{.Err}}{{end}}</pre>
           </td>
         </tr>
         {{else}}
-        <tr><td colspan="7" class="muted">No schedules yet.</td></tr>
+        <tr><td colspan="6" class="muted">No schedules yet.</td></tr>
         {{end}}
       </tbody>
     </table>

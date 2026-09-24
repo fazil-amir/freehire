@@ -307,6 +307,14 @@ func (r *Runner) Crawling(provider string) bool {
 	return r.crawling[provider]
 }
 
+// CrawlCount is how many providers are being crawled right now, from any
+// caller — what the scheduler holds to SCHEDULE_CAPACITY.
+func (r *Runner) CrawlCount() int {
+	r.crawlMu.Lock()
+	defer r.crawlMu.Unlock()
+	return len(r.crawling)
+}
+
 // claimCrawl marks provider as crawling, reporting false if it already was.
 // One provider is never crawled twice at once, whoever asks — a click, a
 // schedule, a bulk run: a second copy would re-fetch the same boards,
@@ -345,8 +353,15 @@ func (r *Runner) crawlOne(provider string, refetchAll bool, job int) error {
 // false, starting nothing, when that provider is already being crawled.
 // refetchAll makes it a full re-crawl (see runIngest).
 func (r *Runner) StartCrawl(provider string, reindexAfter, refetchAll bool, done func(error)) bool {
+	_, ok := r.StartCrawlJob(provider, reindexAfter, refetchAll, done)
+	return ok
+}
+
+// StartCrawlJob is StartCrawl that also returns the crawl's job ID — the
+// scheduler keeps it to include the crawl in the hourly batched reindex.
+func (r *Runner) StartCrawlJob(provider string, reindexAfter, refetchAll bool, done func(error)) (int, bool) {
 	if !r.claimCrawl(provider) {
-		return false
+		return 0, false
 	}
 	job := r.activity.NewJob()
 	go func() {
@@ -360,7 +375,7 @@ func (r *Runner) StartCrawl(provider string, reindexAfter, refetchAll bool, done
 			done(err)
 		}
 	}()
-	return true
+	return job, true
 }
 
 // crawlOutcome is the Outcome status of provider's crawl that just
@@ -390,7 +405,12 @@ func (r *Runner) crawlOutcome(provider string, err error) string {
 // the lock is held and returns how many of the provider's schedules it
 // removed — without that, the next scheduled crawl would re-add every
 // board (a crawl adds what is missing), silently undoing the removal.
-func (r *Runner) StartRemoveProvider(provider string, boards []liveBoard, deleteSchedules func() int) bool {
+//
+// purge runs once every board is retired, still under the lock: it forgets
+// what Board Console holds about the provider — its activity, this run
+// included. A removal that could not retire every board purges nothing, so
+// its log stays to show what failed.
+func (r *Runner) StartRemoveProvider(provider string, boards []liveBoard, deleteSchedules func() int, purge func()) bool {
 	if !r.claimCrawl(provider) {
 		return false
 	}
@@ -418,6 +438,9 @@ func (r *Runner) StartRemoveProvider(provider string, boards []liveBoard, delete
 			err = fmt.Errorf("%d of %d boards could not be retired", failed, len(boards))
 		}
 		r.activity.Finish(run, err)
+		if err == nil && purge != nil {
+			purge()
+		}
 	}()
 	return true
 }

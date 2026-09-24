@@ -5,6 +5,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -41,6 +42,15 @@ func parseTemplates() (*Templates, error) {
 		"buildID":         func() string { return buildID },
 		"techOnly":        catalogueTechOnly,
 		"explainSections": explainSections,
+		"timeRow":         newTimeRow,
+		// joinInts renders a schedule's times for a data attribute: "30,540".
+		"joinInts": func(ns []int) string {
+			parts := make([]string, len(ns))
+			for i, n := range ns {
+				parts[i] = strconv.Itoa(n)
+			}
+			return strings.Join(parts, ",")
+		},
 		"buildDate": func() *time.Time {
 			if t := buildDate(); !t.IsZero() {
 				return &t

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -39,7 +40,9 @@ func NewCleanupStore(path string) (*CleanupStore, error) {
 	s := &CleanupStore{path: path}
 	data, err := os.ReadFile(path)
 	switch {
-	case os.IsNotExist(err):
+	// An empty file (emptied by hand to reset it) is the same fresh start
+	// as a missing one, not a reason to refuse to boot.
+	case os.IsNotExist(err) || (err == nil && len(bytes.TrimSpace(data)) == 0):
 		s.state.LastRun = time.Now()
 		return s, s.save()
 	case err != nil:

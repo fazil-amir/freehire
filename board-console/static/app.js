@@ -272,13 +272,147 @@ function localizeTimes() {
   document.querySelectorAll("time[data-local]").forEach(function (el) {
     var d = new Date(el.getAttribute("datetime"));
     if (isNaN(d)) return;
-    el.textContent = pad(d.getDate()) + "/" + pad(d.getMonth() + 1) + "/" + d.getFullYear() + " - " +
-      pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
+    var hm = pad(d.getHours()) + ":" + pad(d.getMinutes());
+    // data-local="hm" is a time of day alone (a schedule's planned times).
+    el.textContent = el.dataset.local === "hm" ? hm
+      : pad(d.getDate()) + "/" + pad(d.getMonth() + 1) + "/" + d.getFullYear() + " - " + hm + ":" + pad(d.getSeconds());
     el.title = d.toString();
   });
 }
 localizeTimes();
 document.addEventListener("liveregion:refreshed", localizeTimes);
+
+// A schedule's planned times (Schedules table): chips ordered from the
+// viewer's midnight.
+function tidySlotTimes() {
+  document.querySelectorAll(".slot-times").forEach(function (cell) {
+    var times = Array.prototype.slice.call(cell.querySelectorAll("time"));
+    function localMin(t) { var d = new Date(t.getAttribute("datetime")); return d.getHours() * 60 + d.getMinutes(); }
+    times.sort(function (a, b) { return localMin(a) - localMin(b); });
+    times.forEach(function (t) { cell.appendChild(t); });
+  });
+}
+tidySlotTimes();
+document.addEventListener("liveregion:refreshed", tidySlotTimes);
+
+// The Schedules page's 24-hour plan, drawn from #timeline-data (built by
+// buildTimeline in handlers_schedules.go). Everything arrives in minutes
+// after 00:00 UTC; it is shifted here into the viewer's timezone, so the
+// day runs from the viewer's midnight to midnight. Blocks that cross
+// midnight are split in two.
+function drawTimeline() {
+  var host = document.getElementById("timeline");
+  var src = document.getElementById("timeline-data");
+  if (!host || !src) return;
+  var data;
+  try { data = JSON.parse(src.textContent); } catch (e) { return; }
+  var DAY = 1440;
+  var shift = -new Date().getTimezoneOffset(); // local = UTC + shift (minutes)
+  function local(min) { return ((min + shift) % DAY + DAY) % DAY; }
+  function pct(min) { return (min / DAY * 100) + "%"; }
+  function el(tag, cls, parent) { var e = document.createElement(tag); if (cls) e.className = cls; if (parent) parent.appendChild(e); return e; }
+  function block(track, startUTC, minutes, cls, label) { // minutes: every run is one 15-minute block
+    var s = local(startUTC), parts = s + minutes > DAY ? [[s, DAY - s], [0, s + minutes - DAY]] : [[s, minutes]];
+    return parts.map(function (p) {
+      var b = el("div", cls, track);
+      // Inset by 1px each side, so back-to-back slots (00:00, 00:15) read
+      // as separate runs instead of one long bar.
+      b.style.left = "calc(" + pct(p[0]) + " + 1px)";
+      b.style.width = "max(4px, calc(" + pct(p[1]) + " - 2px))";
+      if (label) b.title = label;
+      return b;
+    });
+  }
+  function hhmm(min) { var m = local(min); return String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0"); }
+
+  host.replaceChildren();
+  // Hour scale.
+  var scale = el("div", "tl-row tl-scale", host);
+  el("div", "tl-label", scale);
+  var ticks = el("div", "tl-track", scale);
+  for (var h = 0; h <= 24; h += 3) {
+    var t = el("span", "tl-tick", ticks);
+    t.style.left = pct(h * 60);
+    t.textContent = String(h).padStart(2, "0") + ":00";
+  }
+  // Load strip: how many planned crawls start in each 15-minute slot, one
+  // block per slot, shading from light (one crawl) to full (booked) and red
+  // past the capacity.
+  var loadRow = el("div", "tl-row tl-load", host);
+  el("div", "tl-label", loadRow).textContent = "Load";
+  var loadTrack = el("div", "tl-track", loadRow);
+  (data.load || []).forEach(function (n, i) {
+    if (!n) return;
+    var cls = n > data.capacity ? "tl-slot over" : "tl-slot";
+    block(loadTrack, i * 15, 15, cls, n + " crawl" + (n > 1 ? "s" : "") + " at " + hhmm(i * 15) +
+      (n > data.capacity ? " — " + (n - data.capacity) + " will queue" : n >= data.capacity ? " — booked" : ""))
+      .forEach(function (b) { if (n < data.capacity) b.style.opacity = String(0.35 + 0.65 * n / data.capacity); });
+  });
+  // One bar per schedule, ordered by its first run of the viewer's day.
+  function firstLocal(r) { return Math.min.apply(null, r.starts.map(local)); }
+  var rows = (data.rows || []).slice().sort(function (a, b) { return firstLocal(a) - firstLocal(b) || (a.provider < b.provider ? -1 : 1); });
+  rows.forEach(function (r) {
+    var row = el("div", "tl-row", host);
+    var lab = el("div", "tl-label", row);
+    lab.textContent = r.provider;
+    el("span", "tl-per", lab).textContent = r.starts.length + "×";
+    var track = el("div", "tl-track", row);
+    r.starts.forEach(function (st) {
+      block(track, st, 15, "tl-block", r.provider + " · " + hhmm(st));
+    });
+  });
+  if (!(data.rows || []).length) {
+    el("p", "muted tl-empty", host).textContent = "No schedules yet — add one and it will be placed here.";
+  }
+  // Board Console's own daily job is not a provider row: it is noted under
+  // the plan instead.
+  var sys = host.parentNode.querySelector("[data-timeline-system]");
+  if (sys) sys.textContent = "Dead-board cleanup runs daily at " + hhmm(data.cleanupMin) + ".";
+  // "Now" line across every row.
+  // The one-line summary shown beside the title (and alone when collapsed).
+  var card = host.closest(".timeline-card");
+  var perDay = (data.rows || []).reduce(function (n, r) { return n + r.starts.length; }, 0);
+  var peak = Math.max.apply(null, (data.load || [0]).concat([0]));
+  var summary = card && card.querySelector(".timeline-summary");
+  if (summary) {
+    summary.textContent = (data.rows || []).length + " schedule" + ((data.rows || []).length === 1 ? "" : "s") +
+      " · " + perDay + " crawls a day · busiest slot " + peak + " of " + data.capacity;
+    summary.classList.toggle("over", peak > data.capacity);
+  }
+  applyTimelineCollapsed(card);
+
+  var now = new Date();
+  var nowLine = el("div", "tl-now", host);
+  nowLine.style.setProperty("--now", String((now.getHours() * 60 + now.getMinutes()) / DAY));
+  nowLine.title = "now";
+}
+// The timeline card folds to its header line; the choice is remembered in
+// this browser only (a convenience — storage may be unavailable, and then
+// it simply starts expanded).
+var TIMELINE_KEY = "boardconsole.timelineCollapsed";
+function timelineCollapsed() {
+  try { return localStorage.getItem(TIMELINE_KEY) === "1"; } catch (e) { return false; }
+}
+function applyTimelineCollapsed(card) {
+  if (!card) return;
+  var collapsed = timelineCollapsed();
+  card.classList.toggle("collapsed", collapsed);
+  var btn = card.querySelector("[data-timeline-toggle]");
+  if (btn) btn.setAttribute("aria-expanded", String(!collapsed));
+}
+document.addEventListener("click", function (e) {
+  var btn = e.target.closest("[data-timeline-toggle]");
+  if (!btn) return;
+  try { localStorage.setItem(TIMELINE_KEY, timelineCollapsed() ? "0" : "1"); } catch (err) { /* no storage: this page only */ }
+  var card = btn.closest(".timeline-card");
+  if (card) {
+    var collapsed = !card.classList.contains("collapsed");
+    card.classList.toggle("collapsed", collapsed);
+    btn.setAttribute("aria-expanded", String(!collapsed));
+  }
+});
+drawTimeline();
+document.addEventListener("liveregion:refreshed", drawTimeline);
 
 // Real-time catalog search: every keystroke (debounced) fetches the
 // results fragment and swaps it in place — no reload, no Search button.
@@ -499,8 +633,10 @@ document.addEventListener("liveregion:refreshed", localizeTimes);
 // fallback. Saving POSTs in the background, refreshes the page's table in
 // place and closes the dialog — it never navigates.
 //
-// existing is null for an add, or {id, intervalValue, intervalUnit,
-// reindexAfter} for an edit.
+// A schedule is a list of run times. Each row is an hour and a minute in
+// the viewer's timezone; tz_offset tells the server how to turn them into
+// UTC. existing is null for an add, or {id, times} for an edit (times:
+// minutes after 00:00 UTC).
 function openScheduleModal(provider, existing) {
   var dialog = document.getElementById("schedule-dialog");
   if (!dialog) return;
@@ -512,19 +648,122 @@ function openScheduleModal(provider, existing) {
   if (provider && !Array.prototype.some.call(providerSelect.options, function (o) { return o.value === provider; })) {
     providerSelect.add(new Option(provider, provider));
   }
+  // One schedule per provider: "Add" for a provider that has one edits it.
+  if (!existing && provider) existing = scheduleOfProvider(provider);
 
   form.elements["id"].value = existing ? existing.id : "";
   providerSelect.value = provider || "";
-  form.elements["interval_value"].value = existing ? existing.intervalValue : "30";
-  form.elements["interval_unit"].value = existing ? existing.intervalUnit : "minutes";
-  form.elements["reindex_after"].checked = !!(existing && existing.reindexAfter);
+  setTimeRows(dialog, existing ? existing.times : []);
+  // Remembered so the booked check leaves this schedule's own runs out.
+  dialog.dataset.editTimes = existing ? existing.times.join(",") : "";
+  // Fresh every time: schedules saved since the page loaded count too.
+  scheduleLoad = null;
+  updateTimeRows(dialog);
+  fetch("/schedules/load", { headers: { "X-Board-Console-Fetch": "1" } })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (data) { if (data) { scheduleLoad = data; updateTimeRows(dialog); } })
+    .catch(function () { /* no warning is shown rather than a wrong one */ });
 
   dialog.querySelector("h2").textContent = existing ? "Edit schedule" : "Add schedule";
   form.querySelector('button[type="submit"]').textContent = existing ? "Save changes" : "Save schedule";
   showScheduleError(dialog, "");
   setFieldError(providerSelect, "");
-  setFieldError(form.elements["interval_value"], "");
   dialog.showModal();
+}
+
+// The schedule a provider already has, read off the page's Edit links
+// (Schedules table or Catalog kebab), or null.
+function scheduleOfProvider(provider) {
+  var link = Array.prototype.find.call(document.querySelectorAll("[data-schedule-open][data-id]"),
+    function (a) { return a.dataset.provider === provider; });
+  return link ? { id: link.dataset.id, times: parseTimes(link.dataset.times) } : null;
+}
+
+function parseTimes(s) {
+  return (s || "").split(",").filter(Boolean).map(Number);
+}
+
+function tzShift() { return -new Date().getTimezoneOffset(); } // local = UTC + shift (minutes)
+function toLocalMin(utc) { return ((utc + tzShift()) % 1440 + 1440) % 1440; }
+function toUTCMin(local) { return ((local - tzShift()) % 1440 + 1440) % 1440; }
+
+// Rebuild the rows from UTC minutes, in local time and in order — one empty
+// row when there are none, ready to fill.
+function setTimeRows(dialog, utcTimes) {
+  var list = dialog.querySelector("[data-time-rows]");
+  list.replaceChildren();
+  var local = utcTimes.map(toLocalMin).sort(function (a, b) { return a - b; });
+  if (!local.length) local = [-1];
+  local.forEach(function (m) { addTimeRow(dialog, m); });
+  dialog.querySelector("form").elements["tz_offset"].value = String(tzShift());
+}
+
+function addTimeRow(dialog, localMin) {
+  var tpl = dialog.querySelector("[data-time-row-template]");
+  var row = tpl.content.firstElementChild.cloneNode(true);
+  if (localMin >= 0) {
+    row.querySelector('[name="hour"]').value = String(Math.floor(localMin / 60));
+    row.querySelector('[name="minute"]').value = String(localMin % 60);
+  }
+  dialog.querySelector("[data-time-rows]").appendChild(row);
+  return row;
+}
+
+// A row's time in local minutes, or -1 while either half is unset.
+function rowLocalMin(row) {
+  var h = row.querySelector('[name="hour"]').value, m = row.querySelector('[name="minute"]').value;
+  return h === "" || m === "" ? -1 : Number(h) * 60 + Number(m);
+}
+
+// The day's crawls-starting-per-slot, as /schedules/load returned it when
+// the modal last opened; null until it arrives.
+var scheduleLoad = null;
+
+// Per row, how taken its slot already is (this schedule's own runs left
+// out): free, some of the capacity, or booked — only a warning, saving is
+// still allowed and the crawl queues. A repeated time is flagged; the
+// server keeps it once.
+function updateTimeRows(dialog) {
+  var rows = Array.prototype.slice.call(dialog.querySelectorAll(".time-row"));
+  var load = scheduleLoad ? (scheduleLoad.load || []).slice() : null;
+  var cap = scheduleLoad ? scheduleLoad.capacity : 0;
+  if (load) {
+    parseTimes(dialog.dataset.editTimes).forEach(function (t) {
+      var s = Math.floor(t / 15) % 96;
+      load[s] = Math.max(0, load[s] - 1);
+    });
+  }
+  var seen = {}, filled = 0;
+  rows.forEach(function (row, i) {
+    var note = row.querySelector("[data-time-note]");
+    var m = rowLocalMin(row), msg = "", state = "";
+    row.querySelector(".time-index").textContent = String(i + 1);
+    if (m < 0) {
+      msg = "pick a time";
+      state = "empty";
+    } else if (seen[m]) {
+      msg = "same time twice";
+      state = "dup";
+    } else {
+      seen[m] = true;
+      filled++;
+      if (load) {
+        var n = load[Math.floor(toUTCMin(m) / 15) % 96];
+        if (n >= cap) { msg = "booked · will queue"; state = "booked"; }
+        else if (n > 0) { msg = n + " of " + cap + " taken"; state = "busy"; }
+        else { msg = "free"; state = "free"; }
+      }
+    }
+    row.dataset.state = state;
+    note.textContent = msg;
+    row.querySelector("[data-remove-time]").hidden = rows.length === 1;
+  });
+  var summary = dialog.querySelector("[data-times-summary]");
+  if (summary) {
+    var zone = "";
+    try { zone = new Intl.DateTimeFormat(undefined, { timeZoneName: "short" }).formatToParts(new Date()).find(function (p) { return p.type === "timeZoneName"; }).value; } catch (e) { /* no zone name: just "your timezone" */ }
+    summary.textContent = (filled ? filled + "× a day · " : "") + (zone ? "times in " + zone : "in your timezone");
+  }
 }
 
 function showScheduleError(dialog, message) {
@@ -538,25 +777,48 @@ function showScheduleError(dialog, message) {
   if (!dialog) return;
   var form = dialog.querySelector("form");
   var providerSelect = form.elements["provider"];
-  var valueInput = form.elements["interval_value"];
-  var unitSelect = form.elements["interval_unit"];
 
   document.addEventListener("click", function (e) {
     var trigger = e.target.closest("[data-schedule-open]");
     if (!trigger) return;
     e.preventDefault();
     var d = trigger.dataset;
-    openScheduleModal(d.provider || "", d.id ? {
-      id: d.id,
-      intervalValue: d.intervalValue,
-      intervalUnit: d.intervalUnit,
-      reindexAfter: d.reindexAfter === "true"
-    } : null);
+    openScheduleModal(d.provider || "", d.id ? { id: d.id, times: parseTimes(d.times) } : null);
   });
 
-  if (dialog.dataset.openOnLoad === "true") dialog.showModal();
+  // Picking a provider that already has a schedule switches to editing it.
+  providerSelect.addEventListener("change", function () {
+    if (form.elements["id"].value) return;
+    var existing = scheduleOfProvider(providerSelect.value);
+    if (existing) openScheduleModal(providerSelect.value, existing);
+  });
 
-  var minutesPerUnit = { minutes: 1, hours: 60, days: 1440 };
+  // "+ Add another time" adds a row — or, while one is still empty, takes
+  // you to that one instead of stacking blanks.
+  dialog.querySelector("[data-add-time]").addEventListener("click", function () {
+    var empty = Array.prototype.find.call(dialog.querySelectorAll(".time-row"), function (r) { return rowLocalMin(r) < 0; });
+    var row = empty || addTimeRow(dialog, -1);
+    var pick = row.querySelector('[name="hour"]').value === "" ? "hour" : "minute";
+    row.querySelector('[name="' + pick + '"]').focus();
+    updateTimeRows(dialog);
+  });
+  dialog.addEventListener("click", function (e) {
+    var btn = e.target.closest("[data-remove-time]");
+    if (!btn) return;
+    btn.closest(".time-row").remove();
+    updateTimeRows(dialog);
+  });
+  dialog.addEventListener("change", function (e) {
+    if (e.target.closest(".time-row")) updateTimeRows(dialog);
+  });
+
+  if (dialog.dataset.openOnLoad === "true") {
+    // A no-JS round-trip rendered the rows in UTC; show them locally.
+    var utc = Array.prototype.map.call(dialog.querySelectorAll(".time-row"), rowLocalMin).filter(function (m) { return m >= 0; });
+    setTimeRows(dialog, utc);
+    updateTimeRows(dialog);
+    dialog.showModal();
+  }
 
   form.addEventListener("submit", function (e) {
     e.preventDefault();
@@ -568,17 +830,11 @@ function showScheduleError(dialog, message) {
     } else {
       setFieldError(providerSelect, "");
     }
+    var filled = Array.prototype.some.call(dialog.querySelectorAll(".time-row"), function (r) { return rowLocalMin(r) >= 0; });
+    showScheduleError(dialog, filled ? "" : "Add at least one run time.");
+    if (!ok || !filled) return;
 
-    var minutes = (minutesPerUnit[unitSelect.value] || 1) * Number(valueInput.value || 0);
-    if (!valueInput.value || minutes < 2) {
-      setFieldError(valueInput, "Interval must be at least 2 minutes.");
-      ok = false;
-    } else {
-      setFieldError(valueInput, "");
-    }
-
-    if (!ok) return;
-
+    form.elements["tz_offset"].value = String(tzShift());
     var provider = providerSelect.value;
     postForm(form)
       .then(function () {

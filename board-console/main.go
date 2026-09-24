@@ -76,6 +76,7 @@ func main() {
 
 	runner := NewRunner(csvStore, activity, dbStore, cleanupStore, binariesFromEnv())
 	runner.OnCrawlFinished = scheduleStore.RecordProviderCrawl
+
 	scheduler := NewScheduler(scheduleStore, runner)
 
 	stop := make(chan struct{})
@@ -113,6 +114,7 @@ func main() {
 
 	mux.HandleFunc("GET /schedules", requireAuth(app.sessions, handleSchedules(app)))
 	mux.HandleFunc("POST /schedules/save", requireAuth(app.sessions, handleScheduleSave(app)))
+	mux.HandleFunc("GET /schedules/load", requireAuth(app.sessions, handleScheduleLoad(app)))
 	mux.HandleFunc("POST /schedules/delete", requireAuth(app.sessions, handleScheduleDelete(app)))
 	mux.HandleFunc("POST /schedules/toggle", requireAuth(app.sessions, handleScheduleToggle(app)))
 

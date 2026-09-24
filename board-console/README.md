@@ -214,29 +214,28 @@ and CSV/schedule management work regardless.
   or by the caller waiting for it. `add-boards` has no limit of its own —
   fast, scoped to one provider, and (since it no longer writes to the CSV)
   nothing to race on.
-- **Schedules**: checked once a minute; the floor is 2 minutes and a
-  shorter value is rejected inline. Each due schedule starts in its own
-  goroutine, so a slow crawl never delays another schedule, but a schedule
-  never overlaps ITSELF — while its run is in flight it is skipped, and if
-  the run outlasted its interval it starts again on the next tick. The
-  interval counts from when the provider was last crawled to good effect —
-  the END of its last success/partial crawl from ANY source (a Crawl
-  click, a bulk run, the schedule itself) — so a manual crawl satisfies the
-  schedule instead of being followed by a second crawl a minute later. A
-  crawl that failed outright does not reset it, except the schedule's own
-  run (otherwise a failing provider would be retried every minute). A
-  manual Crawl on a provider crawled within its interval (30 min if
-  unscheduled) asks first, in Board Console's own confirmation dialog —
-  the one every confirmation uses; nothing calls the browser's confirm().
-  A run's start is stamped (status `running`) the moment it begins; the Schedules page refreshes itself while
-  a run is in flight, and each row expands to its provider's latest crawl
-  output. A host that sleeps (a laptop) pauses all of this — the tick and
-  the 30-minute subprocess timeout alike — so a missed slot there is the
-  sleep, not the scheduler. A schedule that has
-  never run is due on the very next tick — fixed a bug where it never
-  became due at all, because "never run" resolved to a fresh `time.Now()`
-  on every check, a moving target a fixed comparison could never catch up
-  to.
+- **Schedules run at the times you set**: a provider has one schedule, a
+  list of run times picked one by one in the modal ("+ Add time": an hour
+  and a minute on the 15-minute grid, in the viewer's timezone, stored as
+  minutes after 00:00 UTC). It crawls once at each, every day, and nothing
+  moves those times. A time already holding `SCHEDULE_CAPACITY` (default 2)
+  runs is **booked**: the modal warns, but lets you pick it anyway. At run
+  time the scheduler starts due runs oldest first only while fewer than
+  `SCHEDULE_CAPACITY` crawls (from any source) are in flight; the rest show
+  as "queued" and start on the first tick after a crawl ends. Every run is
+  one 15-minute block: nothing guesses how long a crawl takes. A new or
+  re-timed schedule first runs at its NEXT time. A run is skipped when a
+  good crawl of the provider (from any source) ended within 15 minutes
+  before it; after downtime only the latest missed run happens, once.
+  Scheduled crawls don't reindex one by one: the first tick of each hour
+  runs ONE reindex for all of them (a shared step of each crawl's job in
+  Activity). The Schedules page draws the day as a 24-hour timeline in the
+  viewer's timezone, sorted by first run, with a load strip and a "now"
+  line; the card folds to a one-line summary (remembered per browser).
+  Older `schedule.json` files are converted on load, and written back:
+  "every N" becomes the nearest crawls-per-day from its last run's time,
+  "N a day from a first run" becomes those N times, and several schedules
+  of one provider merge into one.
 - **Activity log**: the last 500 runs, backed by `data/activity.jsonl` — a
   working log, not an audit trail (it's trimmed and only throttled-persisted
   while a run is in progress, so a crash can lose the last few seconds of a
@@ -259,8 +258,8 @@ and CSV/schedule management work regardless.
   the set of runs on the page changes, the table re-renders in place with
   expanded rows kept open. A "Reindex now" button sits in the header.
 - **Catalog is also the providers view**: each row joins the three stores —
-  how fully the provider is added, its schedule if any (interval, next
-  run, paused), and its most recent activity run. It opens on "Added" —
+  how fully the provider is added, its schedule if any (next run,
+  paused), and its most recent activity run. It opens on "Added" —
   providers with at least one added board, what the old Providers page
   showed (`/providers` redirects there) — and "All" (`?show=all`) widens it
   to the whole catalog.
@@ -273,8 +272,8 @@ and CSV/schedule management work regardless.
   one; a fix from when this still read the CSV, now carried over to the
   live DB read.
 - **Schedules support edit and delete, not just add** — one modal handles
-  both (`POST /schedules/save`, branching on a hidden `id` field: empty
-  creates, set updates the existing entry in place), reachable either from
+  both (`POST /schedules/save`: a provider that already has a schedule gets
+  it updated in place, otherwise one is created), reachable either from
   the Schedules page's own kebab menu or from Catalog's. `POST
   /schedules/delete` removes one; the confirmation is a plain
   `confirm()` (the form's `data-confirm`), no custom dialog needed for
@@ -284,6 +283,13 @@ and CSV/schedule management work regardless.
   apply). One delegated click listener (`app.js`) opens/closes every
   menu on the page — clicking a toggle opens its own menu and closes every
   other one; clicking anywhere else closes all of them.
+- **Remove provider** retires every live board of the provider through
+  `add-board --retire` (rows kept, jobs untouched) and deletes its
+  schedule. Once every board is retired it also purges the provider's runs
+  from the activity log — in memory and in `data/activity.jsonl` — and
+  their cached explanations, so nothing about it lingers on Catalog,
+  Schedules or Activity. A removal that could not retire every board
+  purges nothing: its log stays to show what failed.
 - Subprocess calls run with a 30-minute timeout so a hung command can't
   block the server indefinitely, while still allowing a genuinely slow
   crawl to finish.

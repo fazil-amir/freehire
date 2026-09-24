@@ -5,35 +5,6 @@ import (
 	"time"
 )
 
-func TestScheduleDue_CountsEveryGoodCrawlFromItsFinish(t *testing.T) {
-	now := time.Date(2026, 9, 24, 10, 32, 0, 0, time.UTC)
-	ago := func(m int) time.Time { return now.Add(-time.Duration(m) * time.Minute) }
-	base := Schedule{Enabled: true, IntervalSecs: 1800} // every 30m
-
-	cases := []struct {
-		name string
-		s    Schedule
-		want bool
-	}{
-		{"own run 32m ago, nothing since → due", withRun(base, ago(32), time.Time{}, time.Time{}), true},
-		{"own run 32m ago, a manual crawl finished 1m ago → NOT due", withRun(base, ago(32), time.Time{}, ago(1)), false},
-		{"clock counts from the FINISH: started 40m ago, finished 20m ago → not due", withRun(base, ago(40), ago(20), time.Time{}), false},
-		{"own run failed 31m ago (finish stamped) → due again, not every minute before", withRun(base, ago(35), ago(31), time.Time{}), true},
-		{"old file: only last_run → still works", withRun(base, ago(31), time.Time{}, time.Time{}), true},
-		{"never run → due", base, true},
-	}
-	for _, c := range cases {
-		if got := c.s.Due(now); got != c.want {
-			t.Errorf("%s: Due = %v, want %v (next %v)", c.name, got, c.want, c.s.NextRun())
-		}
-	}
-}
-
-func withRun(s Schedule, started, finished, crawlEnd time.Time) Schedule {
-	s.LastRun, s.LastFinished, s.LastCrawlEnd = started, finished, crawlEnd
-	return s
-}
-
 func TestRecordProviderCrawl_OnlyGoodCrawlsResetTheClock(t *testing.T) {
 	_, store, _ := newTestScheduler(t) // one schedule for "acme"
 	at := time.Now().Round(0)

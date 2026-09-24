@@ -18,7 +18,7 @@ echo "add-board: retired $*" >&2`)
 
 	boards := []liveBoard{{"acme", "one", ""}, {"acme", "two", "eu"}, {"acme", "gone", ""}}
 	var deleted int
-	if !r.StartRemoveProvider("acme", boards, func() int { deleted, _ = store.DeleteByProvider("acme"); return deleted }) {
+	if !r.StartRemoveProvider("acme", boards, func() int { deleted, _ = store.DeleteByProvider("acme"); return deleted }, nil) {
 		t.Fatal("removal did not start")
 	}
 	waitFor(t, "the removal to finish", func() bool { return !r.Crawling("acme") })
@@ -59,11 +59,54 @@ func TestRemoveProvider_RefusedWhileTheProviderIsCrawling(t *testing.T) {
 	if !r.StartCrawl("acme", false, false, func(error) { close(done) }) {
 		t.Fatal("crawl did not start")
 	}
-	if r.StartRemoveProvider("acme", []liveBoard{{"acme", "one", ""}}, func() int { n, _ := store.DeleteByProvider("acme"); return n }) {
+	if r.StartRemoveProvider("acme", []liveBoard{{"acme", "one", ""}}, func() int { n, _ := store.DeleteByProvider("acme"); return n }, nil) {
 		t.Fatal("a removal must be refused while the provider is crawling")
 	}
 	if len(store.List()) != 1 {
 		t.Fatal("a refused removal must not delete schedules")
 	}
 	<-done
+}
+
+// A removal that retires every board purges the provider's activity — in
+// memory and in the file, so it stays gone after a restart — and leaves
+// other providers' runs alone.
+func TestRemoveProvider_CleanRemovalPurgesTheProvidersActivity(t *testing.T) {
+	sched, store, activity := newTestSchedulerFor(t, "acme", "keka")
+	r := sched.runner
+	r.bin.AddBoard = writeScript(t, "true")
+	for _, p := range []string{"acme", "keka"} {
+		activity.Finish(activity.Start("ingest", p, activity.NewJob()), nil)
+	}
+
+	var purged []int
+	purge := func() { purged = activity.PurgeProvider("acme") }
+	if !r.StartRemoveProvider("acme", []liveBoard{{"acme", "one", ""}}, func() int { n, _ := store.DeleteByProvider("acme"); return n }, purge) {
+		t.Fatal("removal did not start")
+	}
+	waitFor(t, "the removal to finish", func() bool { return !r.Crawling("acme") })
+
+	if len(purged) != 2 { // its crawl and the removal run itself
+		t.Errorf("want 2 acme runs purged, got %v", purged)
+	}
+	check := func(where string, runs []*Run) {
+		for _, run := range runs {
+			if run.Provider == "acme" {
+				t.Errorf("%s: acme run %d (%s) survived the purge", where, run.ID, run.Action)
+			}
+		}
+		if len(runs) != 1 || runs[0].Provider != "keka" {
+			t.Errorf("%s: want only keka's run left, got %d runs", where, len(runs))
+		}
+	}
+	check("memory", activity.List())
+	reloaded, _, _ := loadActivityRuns(activity.path, 100)
+	check("file", reloaded)
+
+	// The log keeps working after the rewrite.
+	activity.Finish(activity.Start("ingest", "keka", activity.NewJob()), nil)
+	reloaded, _, _ = loadActivityRuns(activity.path, 100)
+	if len(reloaded) != 2 {
+		t.Errorf("want the new run appended after the purge, got %d runs", len(reloaded))
+	}
 }

@@ -25,7 +25,7 @@
       </td>
       <td>
         {{if .HasSchedule}}
-          every {{.Interval}}{{if .ReindexAfter}} + reindex{{end}}
+          {{len .ScheduleTimes}}× a day
           {{if not .ScheduleEnabled}}<span class="badge badge-no">paused</span>
           {{else if .NextRun.IsZero}}<div class="cell-sub">next: due now</div>
           {{else}}<div class="cell-sub">next: <time datetime="{{iso .NextRun}}" data-local>{{.NextRun.UTC.Format "02/01/2006 - 15:04:05"}} UTC</time></div>{{end}}
@@ -46,7 +46,7 @@
             <form method="post" action="/crawl" data-async data-refresh
                   {{if and .FullyAdded .RecentCrawl}}
                   data-confirm-title="Crawl again?"
-                  data-confirm="{{.Provider}} was crawled {{.RecentCrawl}}{{if .HasSchedule}} and is scheduled every {{.Interval}}{{end}}. Crawling it again this soon mostly re-fetches the same jobs and adds load on the source."
+                  data-confirm="{{.Provider}} was crawled {{.RecentCrawl}}{{if .HasSchedule}} and is scheduled {{len .ScheduleTimes}}× a day{{end}}. Crawling it again this soon mostly re-fetches the same jobs and adds load on the source."
                   data-confirm-label="Crawl again"
                   {{end}}
                   data-done="{{if .FullyAdded}}Crawl{{else}}Add + crawl{{end}} started for {{.Provider}}">
@@ -71,8 +71,7 @@
             {{if .HasSchedule}}
             <a class="kebab-item" href="/schedules?open=edit&id={{.ScheduleID}}"
                data-schedule-open data-id="{{.ScheduleID}}" data-provider="{{.Provider}}"
-               data-interval-value="{{.IntervalValue}}" data-interval-unit="{{.IntervalUnit}}"
-               data-reindex-after="{{.ReindexAfter}}">Edit schedule</a>
+               data-times="{{joinInts .ScheduleTimes}}">Edit schedule</a>
             <form method="post" action="/schedules/delete" data-async data-refresh
                   data-confirm-title="Delete schedule?"
                   data-confirm="{{.Provider}} will no longer be crawled automatically. Its jobs and past runs stay; you can add a schedule again any time."
@@ -89,7 +88,7 @@
             <div class="kebab-sep"></div>
             <form method="post" action="/providers/remove" data-async data-refresh
                   data-confirm-title="Remove {{.Provider}}?"
-                  data-confirm="Its {{.AddedCount}} board(s) are retired and it stops being crawled{{if .HasSchedule}}, and its schedule is deleted{{end}}. Its jobs stay as they are, and Add + Crawl brings it back."
+                  data-confirm="Its {{.AddedCount}} board(s) are retired and it stops being crawled{{if .HasSchedule}}, and its schedule is deleted{{end}}. Once every board is retired, its activity history is cleared too. Its jobs stay as they are, and Add + Crawl brings it back."
                   data-confirm-label="Remove" data-confirm-danger
                   data-done="Removing {{.Provider}} — see Activity for progress">
               <input type="hidden" name="provider" value="{{.Provider}}">

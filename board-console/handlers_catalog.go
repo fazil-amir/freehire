@@ -26,11 +26,8 @@ type ProviderSummary struct {
 	HasSchedule     bool
 	ScheduleID      string // for the kebab menu's edit/delete items
 	ScheduleEnabled bool
-	Interval        string
-	IntervalValue   string // Interval split for the schedule modal's fields
-	IntervalUnit    string
+	ScheduleTimes   []int // its runs, minutes after 00:00 UTC (for the Edit modal)
 	NextRun         time.Time
-	ReindexAfter    bool
 
 	LastRunAt      time.Time
 	LastRunStatus  string // the run's Outcome status (success / partial / failed)
@@ -302,10 +299,8 @@ func attachRunState(app *App, rows []ProviderSummary) {
 			d.HasSchedule = true
 			d.ScheduleID = s.ID
 			d.ScheduleEnabled = s.Enabled
-			d.Interval = formatInterval(s.Interval())
-			d.IntervalValue, d.IntervalUnit = splitInterval(s.IntervalSecs)
+			d.ScheduleTimes = s.Times
 			d.NextRun = s.NextRun()
-			d.ReindexAfter = s.ReindexAfter
 		}
 		if run, ok := lastRunByProvider[d.Provider]; ok {
 			o := run.Outcome()
@@ -313,19 +308,15 @@ func attachRunState(app *App, rows []ProviderSummary) {
 			d.LastRunStatus, d.LastRunSummary = o.Status, o.Summary
 		}
 		if run, ok := lastGoodCrawl[d.Provider]; ok {
-			window := recentCrawlWindow
-			if s, ok := scheduleByProvider[d.Provider]; ok {
-				window = s.Interval()
-			}
-			if since := now.Sub(run.FinishedAt); since < window {
+			if since := now.Sub(run.FinishedAt); since < recentCrawlWindow {
 				d.RecentCrawl = agoText(since)
 			}
 		}
 	}
 }
 
-// recentCrawlWindow is how recent a crawl of an UNSCHEDULED provider must be
-// for a manual Crawl to ask first; a scheduled one uses its interval.
+// recentCrawlWindow is how recent a crawl must be for a manual Crawl to ask
+// first.
 const recentCrawlWindow = 30 * time.Minute
 
 // agoText renders a short duration as "just now" / "4 minutes ago" /
@@ -342,19 +333,6 @@ func agoText(d time.Duration) string {
 		return "1 hour ago"
 	default:
 		return fmt.Sprintf("%d hours ago", m/60)
-	}
-}
-
-// formatInterval renders a schedule interval the way an operator picked
-// it — "15m"/"6h"/"2d" — rather than a raw second count.
-func formatInterval(d time.Duration) string {
-	switch {
-	case d >= 24*time.Hour && d%(24*time.Hour) == 0:
-		return fmt.Sprintf("%dd", int(d/(24*time.Hour)))
-	case d >= time.Hour && d%time.Hour == 0:
-		return fmt.Sprintf("%dh", int(d/time.Hour))
-	default:
-		return fmt.Sprintf("%dm", int(d/time.Minute))
 	}
 }
 
@@ -414,8 +392,8 @@ func handleReindexNow(app *App) http.HandlerFunc {
 }
 
 // handleRemoveProvider is the Catalog menu's "Remove provider": retire all
-// of the provider's live boards (see Runner.StartRemoveProvider) and drop
-// its schedules. The board list comes from the database, so it is refused
+// of the provider's live boards (see Runner.StartRemoveProvider), drop its
+// schedule and, once every board is retired, purge its activity. The board list comes from the database, so it is refused
 // when that is unreachable rather than retiring only what the CSV knows.
 func handleRemoveProvider(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -440,7 +418,12 @@ func handleRemoveProvider(app *App) http.HandlerFunc {
 			}
 			return n
 		}
-		if !app.runner.StartRemoveProvider(provider, boards, deleteSchedules) {
+		purge := func() {
+			ids := app.activity.PurgeProvider(provider)
+			app.explainer.Forget(ids)
+			log.Printf("remove %s: purged %d activity run(s)", provider, len(ids))
+		}
+		if !app.runner.StartRemoveProvider(provider, boards, deleteSchedules, purge) {
 			actionError(w, http.StatusConflict, provider+" is being crawled right now — remove it once that finishes.")
 			return
 		}
