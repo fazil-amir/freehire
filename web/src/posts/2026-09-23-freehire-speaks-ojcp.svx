@@ -1,0 +1,48 @@
+---
+title: Any AI agent can now search our jobs, through an open standard
+date: 2026-09-23
+summary: 'freehire speaks OJCP — a draft open standard for how an AI agent asks a job board for jobs. No integration, no API key: an agent reads one file and knows how to search us.'
+type: changelog
+tags:
+  - api
+  - agents
+  - open-source
+draft: false
+---
+
+If you ask an AI assistant to find you a job today, it mostly scrapes. It loads
+pages built for human eyes and guesses at what's a salary and what's a footer.
+That's why the answers are often stale, or quietly wrong.
+
+freehire now supports **[OJCP](https://spec.ojcp.dev/)** — the Open Job Context
+Protocol, a draft open standard for how an agent asks a job board for jobs
+directly. An agent reads one file at
+[/.well-known/ojcp.json](https://freehire.me/.well-known/ojcp.json), learns what
+we offer, and starts asking. Nobody has to write an integration for freehire
+specifically — that's the whole point of a standard.
+
+Three things an agent can do:
+
+- **Search the catalogue** — the same postings you see on the site, narrowed by
+  location, salary, employment type, seniority and how recently they went up
+- **Pull one posting in full** — description, salary, skills, how to apply
+- **Ask about an employer** — who they are, what they're hiring for
+
+The standard defines fewer filters than the site has, so the finer ones —
+category, skills, hybrid versus on-site, the eligibility gates — are not reachable
+through it yet. Where an agent asks for something OJCP cannot express, the answer
+says which parameter it had to ignore rather than quietly returning more than was
+asked for.
+
+It works over plain HTTP or over [MCP](https://modelcontextprotocol.io), the
+protocol most AI tools already speak. No API key, no signup, nothing to pay —
+same as [our public API](/docs/api). The budget is 300 requests a minute per
+anonymous caller.
+
+We're one of the first implementers outside the group that drafted it, and we've
+been sending our findings back. Writing a real provider turned up several things
+the standard can't express yet — a job open in more than one country, for one —
+each measured against our 5.9 million open postings. Two of those are now
+proposed changes to the spec.
+
+Nothing about the site changes. This is for the agents.

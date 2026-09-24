@@ -57,19 +57,47 @@ type SearchPagination struct {
 	Offset int `json:"offset,omitempty"`
 }
 
-// seniorityFromStandard translates OJCP's experience levels into ours. `entry` maps to BOTH
-// of the levels it covers rather than to one: an agent asking for entry-level work means
-// the internships and the junior roles, and picking one would silently hide the other.
+// seniorityFromStandard translates OJCP's experience levels into ours.
+//
+// This map is the INBOUND half of a pair, and the two halves have to name the same set.
+// jobPostingFrom publishes our seniority verbatim wherever the standard has no word for it
+// (see experienceLevel in jobposting.go), so a posting of ours can say `intern`, `junior`,
+// `staff` or `principal`. An agent that reads one of those off a posting and sends it back
+// as a filter must not be told we do not understand it: the filter would be dropped and the
+// answer would widen to the whole catalogue. Publishing a value we then refuse to filter on
+// is a silent widening one step removed, so all four are accepted back here, and
+// TestEverySenioritySurvivesTheRoundTrip holds that closed.
+//
+// `entry` is the one asymmetry, and it is deliberate: it is a standard word we never
+// publish, so it is accepted inbound only, and it narrows to `junior` alone. It used to
+// cover `intern` as well, on the reasoning that an agent asking for entry-level work wants
+// the internships too. That reasoning held only while `intern` had no name of its own here.
+// It has one now — an agent can ask for `intern` directly — so an internship and a junior
+// role are two different things a candidate searches for: an agent that wants both asks
+// twice, and one that wants junior roles WITHOUT internships can finally say so, which the
+// old mapping made impossible.
+//
+// `intern` is OUR value, not a standard one. The standard's documented set is still
+// entry/mid/senior/lead/director/executive (see testdata/schemas/tools/search-jobs-input.json);
+// adding intern/staff/principal to it is only PROPOSED, in ojcp-org/ojcp#23. Nothing here
+// waits on that: the field is an open string either way. When that PR lands, re-copy the
+// vendored schemas per testdata/schemas/README.md rather than editing this comment.
 //
 // `director` is absent because we hold no level that means it. Our `lead` is a team lead,
 // not a director, and answering one for the other would be a wrong result rather than a
 // missing filter — such a request is reported unsupported instead.
 var seniorityFromStandard = map[string]string{
-	"entry":     "intern,junior",
+	// The standard's words.
+	"entry":     "junior",
 	"mid":       "middle",
 	"senior":    "senior",
 	"lead":      "lead",
 	"executive": "c_level",
+	// Ours, published verbatim where the standard has no word.
+	"intern":    "intern",
+	"junior":    "junior",
+	"staff":     "staff",
+	"principal": "principal",
 }
 
 // QueryValues translates an OJCP search into this catalogue's own query vocabulary — the
