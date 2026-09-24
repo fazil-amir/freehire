@@ -25,6 +25,7 @@ type App struct {
 	schedules *ScheduleStore
 	runner    *Runner
 	cleanup   *CleanupStore
+	explainer *Explainer
 	sessions  *SessionStore
 	db        *DBStore // nil when DATABASE_URL is unset or the open failed — every reader falls back gracefully
 }
@@ -86,6 +87,7 @@ func main() {
 		schedules: scheduleStore,
 		runner:    runner,
 		cleanup:   cleanupStore,
+		explainer: NewExplainerFromEnv(),
 		sessions:  NewSessionStore(),
 		db:        dbStore,
 	}
@@ -114,6 +116,7 @@ func main() {
 
 	mux.HandleFunc("GET /activity", requireAuth(app.sessions, handleActivity(app)))
 	mux.HandleFunc("GET /activity/status", requireAuth(app.sessions, handleActivityStatus(app)))
+	mux.HandleFunc("POST /activity/explain", requireAuth(app.sessions, handleExplain(app)))
 	mux.HandleFunc("POST /cleanup/preview", requireAuth(app.sessions, handleCleanup(app, false)))
 	mux.HandleFunc("POST /cleanup/run", requireAuth(app.sessions, handleCleanup(app, true)))
 

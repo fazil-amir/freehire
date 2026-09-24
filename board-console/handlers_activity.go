@@ -27,6 +27,9 @@ type activityPageData struct {
 	NextURL    string // empty on the last page
 
 	Cleanup cleanupCard
+
+	ExplainEnabled bool           // OPENAI_API_KEY is set
+	Explanations   map[int]string // cached answers by run ID, re-rendered on every refresh
 }
 
 // cleanupCard is the Cleanup tab's last/next run, shown in its toolbar.
@@ -156,6 +159,8 @@ func handleActivity(app *App) http.HandlerFunc {
 			TotalPages:     totalPages,
 			Total:          len(matching),
 			Cleanup:        buildCleanupCard(app),
+			ExplainEnabled: app.explainer.Enabled(),
+			Explanations:   app.explainer.Cached(),
 		}
 		if page > 1 {
 			data.PrevURL = pageURL(r, page-1)
@@ -203,5 +208,45 @@ func handleActivityStatus(app *App) http.HandlerFunc {
 			"running": app.activity.AnyRunning(),
 			"runs":    out,
 		})
+	}
+}
+
+// explainHistory is how many earlier runs of the same kind go with an
+// explanation request — enough to spot "this board has failed every time".
+const explainHistory = 5
+
+// handleExplain is the "Explain this run" button: it asks the model (see
+// explain.go) and returns {"explanation": "..."}.
+func handleExplain(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !app.explainer.Enabled() {
+			actionError(w, http.StatusServiceUnavailable, "Set OPENAI_API_KEY in .env to enable explanations.")
+			return
+		}
+		id, _ := strconv.Atoi(r.FormValue("id"))
+		run, ok := app.activity.Get(id)
+		if !ok {
+			actionError(w, http.StatusNotFound, "That run is no longer in the activity log.")
+			return
+		}
+
+		// Earlier runs of the same action for the same provider, newest first.
+		var history []*Run
+		for _, h := range app.activity.List() {
+			if h.ID < run.ID && h.Action == run.Action && h.Provider == run.Provider {
+				history = append(history, h)
+				if len(history) == explainHistory {
+					break
+				}
+			}
+		}
+
+		answer, err := app.explainer.Explain(r.Context(), run, history)
+		if err != nil {
+			actionError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"explanation": answer})
 	}
 }

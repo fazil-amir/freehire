@@ -223,6 +223,12 @@ services:
       # inherits it, and a crawl that disagrees with the site about what belongs in the
       # catalogue stores (or drops) the wrong jobs. Override both at once from .env.
       CATALOGUE_TECH_ONLY: "${CATALOGUE_TECH_ONLY:-false}"
+      # "Explain this run" on the Activity page. Put the key in .env (never in
+      # this file); unset leaves the button disabled. OPENAI_MODEL defaults to
+      # gpt-4o-mini; OPENAI_BASE_URL points at an OpenAI-compatible gateway.
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      OPENAI_MODEL: "${OPENAI_MODEL:-}"
+      OPENAI_BASE_URL: "${OPENAI_BASE_URL:-}"
     ports:
       # Host port 8040 (8091 clashes with Beszel). Override with BOARD_CONSOLE_HOST_PORT.
       - "${BOARD_CONSOLE_HOST_PORT:-8040}:8091"

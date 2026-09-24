@@ -288,6 +288,19 @@ func (a *ActivityLog) List() []*Run {
 	return out
 }
 
+// Get returns a snapshot of one run by ID (see List on why a copy).
+func (a *ActivityLog) Get(id int) (*Run, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, r := range a.runs {
+		if r.ID == id {
+			snapshot := *r
+			return &snapshot, true
+		}
+	}
+	return nil, false
+}
+
 // AnyRunning reports whether at least one run is still in progress — drives
 // whether the Activity page keeps polling.
 func (a *ActivityLog) AnyRunning() bool {

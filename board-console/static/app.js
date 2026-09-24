@@ -122,6 +122,42 @@ function keepLive(selector, idleMs) {
 keepLive("[data-schedules]", 15000);
 keepLive("#catalog-results", 0);
 
+// "Explain this run": ask the model about one run and show the answer
+// under its output. The server caches answers for finished runs and renders
+// them on every refresh, so the answer survives the page's live updates.
+document.addEventListener("click", function (e) {
+  var btn = e.target.closest("[data-explain]");
+  if (!btn) return;
+  var id = btn.dataset.explain;
+  btn.disabled = true;
+  btn.textContent = "Thinking…";
+  fetch("/activity/explain", {
+    method: "POST",
+    headers: { "X-Board-Console-Fetch": "1" },
+    body: new URLSearchParams({ id: id })
+  })
+    .then(function (r) {
+      return r.json().then(function (data) {
+        if (!r.ok) throw new Error(data.error || "Could not explain this run.");
+        return data.explanation;
+      });
+    })
+    .then(function (text) {
+      // Look the box up again: a live refresh may have replaced it meanwhile.
+      var box = document.querySelector('[data-explain-for="' + id + '"]');
+      if (!box) return;
+      var answer = document.createElement("div");
+      answer.className = "explain-answer";
+      answer.textContent = text;
+      box.replaceChildren(answer);
+    })
+    .catch(function (err) {
+      toast(err.message, true);
+      var again = document.querySelector('[data-explain="' + id + '"]');
+      if (again) { again.disabled = false; again.textContent = "✦ Explain this run"; }
+    });
+});
+
 // Any [data-dialog-close] (the header's ×, a Cancel button) closes its
 // dialog, as does a click on the backdrop — which lands on the <dialog>
 // element itself, outside its content box.

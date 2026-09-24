@@ -181,6 +181,9 @@ and CSV/schedule management work regardless.
 | `DATABASE_URL` | — | Read-only Postgres connection for live added status (`db.go`), **and** passed through to the `ingest`/`reindex` subprocesses |
 | `MEILI_URL` / `MEILI_MASTER_KEY` | — | Passed through to `reindex` |
 | `BULK_ADD_BOARDS_BIN` / `INGEST_BIN` / `REINDEX_BIN` | `/app/bulk-add-boards` / `/app/ingest` / `/app/reindex` | Override the binary paths (for running outside the container) |
+| `OPENAI_API_KEY` | — | Enables **Explain this run** on Activity (the run's details and log tail go to the model with a built-in briefing on this tool). Set it in `.env`, never in a committed file; unset leaves the button disabled |
+| `OPENAI_MODEL` | `gpt-4o-mini` | The model that writes the explanation |
+| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | Any OpenAI-compatible `/chat/completions` endpoint |
 
 ## Behaviour notes
 

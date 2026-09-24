@@ -121,6 +121,11 @@ stderr:
 {{.Stderr}}
 {{if .Err}}
 error: {{.Err}}{{end}}</pre>
+            <div class="explain" data-explain-for="{{.ID}}">
+              {{with index $.Explanations .ID}}<div class="explain-answer">{{.}}</div>
+              {{else}}<button type="button" class="btn btn-secondary btn-sm" data-explain="{{.ID}}"
+                      {{if not $.ExplainEnabled}}disabled title="Set OPENAI_API_KEY in .env to enable"{{end}}>✦ Explain this run</button>{{end}}
+            </div>
           </td>
         </tr>
         {{else}}

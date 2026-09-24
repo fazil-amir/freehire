@@ -630,6 +630,18 @@ code {
 
 /* --- activity --- */
 .run-row { cursor: pointer; }
+/* "Explain this run" and its answer, under a run's output. */
+.explain { margin-top: 12px; }
+.explain-answer {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  border-left: 3px solid var(--accent);
+}
 .run-detail-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; font-size: 13px; color: var(--text-muted); }
 .run-output {
   margin: 0;
