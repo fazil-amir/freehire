@@ -209,7 +209,8 @@ services:
       # catalogue stores (or drops) the wrong jobs. Override both at once from .env.
       CATALOGUE_TECH_ONLY: "${CATALOGUE_TECH_ONLY:-false}"
     ports:
-      - "${BOARD_CONSOLE_HOST_PORT:-8091}:8091"
+      # Host port 8040 (8091 clashes with Beszel). Override with BOARD_CONSOLE_HOST_PORT.
+      - "${BOARD_CONSOLE_HOST_PORT:-8040}:8091"
     volumes:
       # The CSV and schedule.json are board-console's only persistent store — this
       # keeps them on the host (and git-trackable) across container rebuilds.

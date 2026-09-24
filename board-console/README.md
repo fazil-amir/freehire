@@ -122,10 +122,28 @@ No separate build or run step is needed — `make up` (`docker compose up
 reachable at:
 
 ```
-http://localhost:8091
+http://localhost:8040
 ```
 
 (override the host port with `BOARD_CONSOLE_HOST_PORT`).
+
+### Ports
+
+Every host port `make up` publishes, from `docker-compose.yml`. Each one can
+be moved by setting its variable in `.env`.
+
+| Service | URL on the host | Container port | Override with |
+|---|---|---|---|
+| Board Console | http://localhost:8040 | 8091 | `BOARD_CONSOLE_HOST_PORT` |
+| Web (the site) | http://localhost:8090 | 80 | `WEB_HOST_PORT` |
+| API (Go server) | http://localhost:8080 | 8080 | `HIRE_HOST_PORT` |
+| Postgres | localhost:5432 | 5432 | `DB_HOST_PORT` |
+| Meilisearch | http://localhost:7700 | 7700 | `MEILI_HOST_PORT` |
+| MinIO (S3) | http://localhost:9000 | 9000 | `MINIO_HOST_PORT` |
+| Redis | not published | 6379 | — |
+
+8091 is deliberately NOT a host port: Beszel uses it. Board Console still
+listens on 8091 *inside* its container; only the published port moved.
 
 ### Building/running outside Docker (e.g. for local development on this
 folder alone)
