@@ -86,9 +86,25 @@ stdout/stderr is itself capped at 2MB (oldest output dropped first, since
 the tail — recent progress, or the error that ended it — is what a huge
 dump gets read for).
 
-All three files live under `data/`, which is mounted as a volume in
-`docker-compose.yml` so they survive container rebuilds and stay
-git-trackable on the host.
+All of them live under `data/`, which is mounted as a volume in
+`docker-compose.yml` so they survive container rebuilds. Only
+`combined_boards.csv` is tracked in git — it is the shared board catalog.
+`activity.jsonl`, `schedule.json` and `cleanup.json` are **per machine** and
+git-ignored: each environment (a laptop, the VPS) keeps its own run
+history, schedules and cleanup clock, and a fresh clone starts them empty.
+
+On a Linux host the container (uid 65532) must be able to write `data/`,
+while your own user must still be able to `git pull` the CSV. Once per
+clone:
+
+```bash
+sudo chown -R "$USER":65532 board-console/data
+sudo chmod -R g+rwX board-console/data
+sudo chmod g+s board-console/data   # new files inherit the group
+```
+
+(Docker Desktop on macOS does not enforce this, which is why it only bites
+on the server.)
 
 ## Credentials
 

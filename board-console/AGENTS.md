@@ -81,10 +81,10 @@ board-console/
                         schedule_modal.html is the ONE add/edit schedule
                         dialog, included by every page that needs it
   static/{style.css,app.js}  the whole frontend — no build step, no bundler
-  data/                  the three persistent files (see README) — a
-                        docker-compose bind mount, so it's also where a
-                        fresh clone's runtime state lives if you test
-                        locally with DATA_DIR=./data
+  data/                  the persistent files (see README) — a
+                        docker-compose bind mount. Only combined_boards.csv
+                        is tracked; activity.jsonl, schedule.json and
+                        cleanup.json are per-machine and git-ignored
   *_test.go              table-driven tests beside the code they cover
                         (no separate test package)
 ```
@@ -177,10 +177,13 @@ board-console/
   action pills), deliberately not a copy of freehire's brand green; keep
   new component styles referencing those custom properties rather than
   literal colors.
-- **`data/*` files you create while testing locally are real, tracked
-  files if you're pointed at the repo's own `data/` directory** — always
-  test against a copied/temp `DATA_DIR`, never the tracked one, unless
-  you mean to commit what you produce.
+- **Runtime state never goes through git.** `activity.jsonl`,
+  `schedule.json` and `cleanup.json` are git-ignored because committing them
+  copied one machine's schedules and history onto another (a laptop's
+  15-minute schedule started crawling on the VPS). Every store must keep
+  starting cleanly from a missing file. `combined_boards.csv` IS tracked —
+  still test against a copied/temp `DATA_DIR` so a test's appended rows
+  never reach a commit.
 
 ## Commands
 

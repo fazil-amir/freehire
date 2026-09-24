@@ -1,1 +1,9 @@
 board-console
+
+# Runtime state — per machine, never shared through git. Each environment
+# (a laptop, the VPS) keeps its own run history, schedules and cleanup
+# clock; committing them copied one machine's schedules onto another.
+# combined_boards.csv stays tracked: it is the shared board catalog.
+data/activity.jsonl
+data/schedule.json
+data/cleanup.json

@@ -212,8 +212,10 @@ services:
       # Host port 8040 (8091 clashes with Beszel). Override with BOARD_CONSOLE_HOST_PORT.
       - "${BOARD_CONSOLE_HOST_PORT:-8040}:8091"
     volumes:
-      # The CSV and schedule.json are board-console's only persistent store — this
-      # keeps them on the host (and git-trackable) across container rebuilds.
+      # board-console's only persistent store, kept on the host across rebuilds. Only
+      # combined_boards.csv is in git; activity/schedule/cleanup are per machine
+      # (git-ignored). On Linux the container (uid 65532) needs write access here —
+      # see board-console/README.md.
       - ./board-console/data:/app/data
       # Read-only: only statfs'd by reindex's disk-guard (see MEILI_DATA_DIR),
       # never written — Meilisearch itself is the volume's only writer.
