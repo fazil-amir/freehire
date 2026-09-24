@@ -315,10 +315,11 @@ function drawTimeline() {
     var s = local(startUTC), parts = s + minutes > DAY ? [[s, DAY - s], [0, s + minutes - DAY]] : [[s, minutes]];
     return parts.map(function (p) {
       var b = el("div", cls, track);
-      // Inset by 1px each side, so back-to-back slots (00:00, 00:15) read
-      // as separate runs instead of one long bar.
-      b.style.left = "calc(" + pct(p[0]) + " + 1px)";
-      b.style.width = "max(4px, calc(" + pct(p[1]) + " - 2px))";
+      // Centred on its START time — the moment it runs, like the hour
+      // labels and the "now" line — and a full slot wide; a ring in the
+      // card's colour (CSS) keeps back-to-back runs (00:00, 00:15) apart.
+      b.style.left = pct(p[0]);
+      b.style.width = "max(6px, " + pct(p[1]) + ")";
       if (label) b.title = label;
       return b;
     });
@@ -326,12 +327,20 @@ function drawTimeline() {
   function hhmm(min) { var m = local(min); return String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0"); }
 
   host.replaceChildren();
+  // Hour gridlines, drawn first so every block paints over them.
+  var grid = el("div", "tl-grid", host);
+  // One per hour; the 3-hourly ones a touch stronger.
+  for (var g = 0; g <= 24; g++) {
+    el("span", g % 3 ? "tl-gridline" : "tl-gridline major", grid).style.left = pct(g * 60);
+  }
   // Hour scale.
   var scale = el("div", "tl-row tl-scale", host);
   el("div", "tl-label", scale);
   var ticks = el("div", "tl-track", scale);
-  for (var h = 0; h <= 24; h += 3) {
-    var t = el("span", "tl-tick", ticks);
+  // Each hour's label sits on its gridline, over the runs that start then;
+  // the ones between the 3-hourly labels hide on a narrow screen.
+  for (var h = 0; h < 24; h++) {
+    var t = el("span", h % 3 ? "tl-tick minor" : "tl-tick", ticks);
     t.style.left = pct(h * 60);
     t.textContent = String(h).padStart(2, "0") + ":00";
   }

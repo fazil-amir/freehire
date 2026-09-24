@@ -751,12 +751,12 @@ code {
 .lg-over { background: var(--danger); }
 
 .timeline { position: relative; --tl-label: 150px; }
-.tl-row { display: flex; align-items: center; min-height: 26px; }
+.tl-row { display: flex; align-items: center; min-height: 32px; }
 .tl-row + .tl-row { border-top: 1px dashed var(--border); }
 .tl-label {
   width: var(--tl-label);
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: 14px; /* the tables' cell size */
   color: var(--text);
   padding-right: 12px;
   white-space: nowrap;
@@ -796,28 +796,52 @@ code {
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
-.tl-per { margin-left: 6px; color: var(--text-faint); font-size: 11px; }
-.tl-track { position: relative; flex: 1; height: 26px; }
-.tl-scale .tl-track { height: 18px; }
-.tl-tick { position: absolute; top: 0; transform: translateX(-50%); font-size: 11px; color: var(--text-faint); }
-.tl-tick:first-child { transform: none; }
-.tl-tick:last-child { transform: translateX(-100%); }
-/* Run and load blocks are squares: their width is one 15-minute slot
-   (set by app.js), their height follows it, capped so a wide screen does
-   not outgrow the row. */
+.tl-per { margin-left: 6px; color: var(--text-faint); font-size: 12px; }
+.tl-track { position: relative; flex: 1; height: 32px; }
+.tl-row.tl-scale { min-height: 26px; }
+.tl-scale .tl-track { height: 18px; container-type: inline-size; }
+.tl-tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.tl-tick.minor { opacity: 0.6; }
+/* Below ~45px an hour, "00:00" no longer fits its column: keep every
+   third label only. */
+@container (max-width: 1080px) { .tl-tick.minor { display: none; } }
+/* Run and load blocks are squares centred on their start time: the width
+   (set by app.js) is one 15-minute slot's, the height follows it, capped
+   so a wide screen does not outgrow the row. */
 .tl-block,
 .tl-slot {
   position: absolute;
   top: 50%;
-  transform: translateY(-50%);
-  max-width: 20px;
+  transform: translate(-50%, -50%);
+  max-width: 24px;
   aspect-ratio: 1;
-  border-radius: 4px;
+  border-radius: 5px;
   background: var(--accent);
+  box-shadow: 0 0 0 1px var(--surface);
 }
 /* app.js lowers a load slot's opacity when fewer crawls than the capacity
    start there, so it deepens as it fills; past it, red. */
 .tl-slot.over { background: var(--danger); }
+/* Vertical lines at every hour, under the scale and across every
+   row, aligned with the tracks (which start after the label column). */
+.tl-grid {
+  position: absolute;
+  top: 26px; /* under the scale row (.tl-row.tl-scale's height) */
+  bottom: 0;
+  left: var(--tl-label);
+  right: 0;
+  pointer-events: none;
+}
+.tl-gridline { position: absolute; top: 0; bottom: 0; border-left: 1px dashed rgba(220, 217, 219, 0.05); }
+.tl-gridline.major { border-left-color: var(--border); }
 .tl-now {
   position: absolute;
   top: 0;
