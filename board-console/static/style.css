@@ -141,10 +141,9 @@ h1, h2 { font-weight: 600; }
 .side-nav a.active svg { color: var(--accent); opacity: 1; }
 .sidebar-end { margin-top: auto; display: flex; flex-direction: column; gap: 10px; }
 .logout-form { margin: 0; }
+.brand-text { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
 .scope-pill {
-  align-self: flex-start;
-  margin-left: 12px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
   padding: 3px 10px;
   border-radius: 999px;
@@ -153,11 +152,8 @@ h1, h2 { font-weight: 600; }
   cursor: help;
 }
 
-main {
-  max-width: 1280px;
-  padding: 36px 40px 40px;
-}
-.sidebar ~ main, .sidebar ~ .site-footer { margin-left: var(--sidebar-width); }
+main { padding: 36px 40px 40px; }
+.sidebar ~ main { margin-left: var(--sidebar-width); }
 
 /* Narrow screens: the sidebar folds into a bar across the top. */
 @media (max-width: 900px) {
@@ -177,8 +173,9 @@ main {
   .side-nav { flex-direction: row; }
   .side-nav a { width: auto; padding: 8px 10px; }
   .sidebar-end { margin: 0 0 0 auto; flex-direction: row; align-items: center; }
-  .scope-pill { margin: 0; align-self: center; }
-  .sidebar ~ main, .sidebar ~ .site-footer { margin-left: 0; }
+  .sidebar ~ main { margin-left: 0; }
+  .brand-text { flex-direction: row; align-items: center; }
+  .build-info { display: none; }
   main { padding: 24px 16px; }
 }
 
@@ -430,12 +427,15 @@ table.catalog-table tbody tr.run-detail:hover { background: none; }
   gap: 4px;
   line-height: 1.6;
 }
-.badge-done { background: var(--success-muted); color: var(--success); }
+/* A run's Outcome: success green, partial orange (it worked, with
+   exceptions), failed red; running takes the accent so it never reads as
+   partial. badge-done is the cleanup clock's own status. */
+.badge-success, .badge-done { background: var(--success-muted); color: var(--success); }
+.badge-partial { background: var(--warning-muted); color: var(--warning); }
 .badge-failed { background: var(--danger-muted); color: var(--danger); }
-.badge-running { background: var(--warning-muted); color: var(--warning); }
+.badge-running { background: var(--accent-muted); color: var(--accent); }
 .badge-queued { background: var(--surface-raised); color: var(--text-muted); }
 .badge-yes { background: var(--success-muted); color: var(--success); }
-.badge-partial { background: var(--warning-muted); color: var(--warning); }
 .badge-no { background: var(--surface-raised); color: var(--text-muted); }
 
 .inline-form { display: inline; }
@@ -726,11 +726,11 @@ code {
   color: var(--text-muted);
 }
 
-/* --- footer --- */
-.site-footer {
-  max-width: 1280px;
-  padding: 0 40px 32px;
-  font-size: 12px;
+/* Build ID and date, at the foot of the sidebar. */
+.build-info {
+  padding: 4px 12px 0;
+  font-size: 11px;
+  line-height: 1.6;
   color: var(--text-faint);
 }
-.site-footer code { background: var(--surface); color: var(--text-muted); }
+.build-info code { background: var(--surface); color: var(--text-muted); font-size: 11px; }

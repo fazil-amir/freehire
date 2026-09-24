@@ -4,7 +4,14 @@
     <span class="brand-mark" aria-hidden="true">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
     </span>
-    Board Console
+    <div class="brand-text">
+      Board Console
+      {{if techOnly}}
+      <span class="scope-pill" title="CATALOGUE_TECH_ONLY is on: crawls reject non-technical jobs and search hides them.">IT only</span>
+      {{else}}
+      <span class="scope-pill" title="CATALOGUE_TECH_ONLY=false: every job is crawled, stored and searchable. Enrichment, embeddings and the sitemap stay IT-only.">All jobs</span>
+      {{end}}
+    </div>
   </div>
   <nav class="side-nav">
     <a href="/" class="{{if eq .Active "catalog"}}active{{end}}">
@@ -18,11 +25,6 @@
       Activity</a>
   </nav>
   <div class="sidebar-end">
-    {{if techOnly}}
-    <span class="scope-pill" title="CATALOGUE_TECH_ONLY is on: crawls reject non-technical jobs and search hides them.">IT only</span>
-    {{else}}
-    <span class="scope-pill" title="CATALOGUE_TECH_ONLY=false: every job is crawled, stored and searchable. Enrichment, embeddings and the sitemap stay IT-only.">All jobs</span>
-    {{end}}
     <form method="post" action="/logout" class="logout-form">
       <button type="submit">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -32,6 +34,12 @@
         Log out
       </button>
     </form>
+    {{/* Which build is running: a fingerprint of board-console's source and
+         when the image was built — both stamped by the Dockerfile. */}}
+    <div class="build-info">
+      Build <code>{{buildID}}</code>
+      {{with buildDate}}<div><time datetime="{{iso .}}" data-local>{{.UTC.Format "02/01/2006 - 15:04:05"}} UTC</time></div>{{end}}
+    </div>
   </div>
 </aside>
 {{end}}
@@ -65,12 +73,4 @@
      enclosing <dialog> for any [data-dialog-close]. */}}
 {{define "dialog-close"}}
 <button type="button" class="dialog-close" data-dialog-close aria-label="Close">×</button>
-{{end}}
-
-{{/* Which build is running: a fingerprint of board-console's source and when
-     the image was built — both stamped by the Dockerfile (see buildinfo.go). */}}
-{{define "footer"}}
-<footer class="site-footer">
-  Build <code>{{buildID}}</code>{{with buildDate}} · built <time datetime="{{iso .}}" data-local>{{.UTC.Format "02/01/2006 - 15:04:05"}} UTC</time>{{end}}
-</footer>
 {{end}}

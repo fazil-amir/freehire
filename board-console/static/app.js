@@ -61,6 +61,11 @@ function toast(message, isError) {
 function refreshLiveRegion() {
   var regions = document.querySelectorAll("[data-live-region]");
   if (!regions.length) return Promise.resolve();
+  // A re-render replaces the rows — and with them an open ⋮ menu, which
+  // would snap shut under the pointer while a run is updating the table.
+  // Skip this refresh; every caller schedules another, which lands once the
+  // menu is closed.
+  if (document.querySelector(".kebab-menu:not([hidden])")) return Promise.resolve();
   return fetch(window.location.pathname + window.location.search, {
     headers: { "X-Board-Console-Fetch": "1" }
   })
@@ -145,13 +150,16 @@ document.addEventListener("click", function (e) {
     .then(function (html) {
       // Look the box up again: a live refresh may have replaced it meanwhile.
       // The HTML is the server's own template output (escaped there).
-      var box = document.querySelector('[data-explain-for="' + id + '"]');
-      if (box) box.innerHTML = html;
+      document.querySelectorAll('[data-explain-for="' + id + '"]').forEach(function (box) {
+        box.innerHTML = html;
+      });
     })
     .catch(function (err) {
       toast(err.message, true);
-      var again = document.querySelector('[data-explain="' + id + '"]');
-      if (again) { again.disabled = false; again.textContent = "✦ Explain this run"; }
+      document.querySelectorAll('[data-explain="' + id + '"]').forEach(function (again) {
+        again.disabled = false;
+        again.textContent = "✦ Explain this run";
+      });
     });
 });
 
@@ -566,7 +574,7 @@ function showScheduleError(dialog, message) {
 
         if (!sameSet) {
           // The refresh announces itself, which schedules the next poll.
-          refreshKeepingOpen();
+          refreshKeepingOpen().finally(function () { schedulePoll(2000); });
           return;
         }
 
@@ -575,10 +583,10 @@ function showScheduleError(dialog, message) {
         var finished = runs.some(function (r) {
           var badge = document.querySelector('.run-row[data-run-id="' + r.id + '"] .status-badge');
           return badge && (badge.textContent === "running" || badge.textContent === "queued") &&
-            (r.status === "done" || r.status === "failed");
+            r.status !== "running" && r.status !== "queued";
         });
         if (finished) {
-          refreshKeepingOpen();
+          refreshKeepingOpen().finally(function () { schedulePoll(2000); });
           return;
         }
 
@@ -588,6 +596,8 @@ function showScheduleError(dialog, message) {
           var badge = row.querySelector(".status-badge");
           badge.textContent = r.status;
           badge.className = "badge badge-" + r.status + " status-badge";
+          var summary = row.querySelector(".outcome-summary");
+          if (summary) summary.textContent = r.summary;
           row.querySelector(".duration-cell").textContent = r.duration;
 
           var detail = document.getElementById("detail-" + r.id);
@@ -596,7 +606,9 @@ function showScheduleError(dialog, message) {
           }
         });
 
-        if (data.running) schedulePoll(2000);
+        // Idle, keep a slow watch: a run a schedule or another tab starts
+        // should appear without a reload.
+        schedulePoll(data.running ? 2000 : 15000);
       })
       .catch(function () { schedulePoll(3000); });
   }

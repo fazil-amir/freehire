@@ -22,6 +22,16 @@ type Templates struct {
 }
 
 func LoadTemplates() *Templates {
+	t, err := parseTemplates()
+	if err != nil {
+		log.Fatalf("parse templates: %v", err)
+	}
+	return t
+}
+
+// parseTemplates is LoadTemplates without the exit, so a test can prove
+// every template parses and renders.
+func parseTemplates() (*Templates, error) {
 	funcs := template.FuncMap{
 		"add": func(a, b int) int { return a + b },
 		"sub": func(a, b int) int { return a - b },
@@ -40,9 +50,9 @@ func LoadTemplates() *Templates {
 	}
 	t, err := template.New("").Funcs(funcs).ParseFS(templateFS, "templates/*.html")
 	if err != nil {
-		log.Fatalf("parse templates: %v", err)
+		return nil, err
 	}
-	return &Templates{tmpl: t}
+	return &Templates{tmpl: t}, nil
 }
 
 func (t *Templates) Render(w http.ResponseWriter, name string, data any) {

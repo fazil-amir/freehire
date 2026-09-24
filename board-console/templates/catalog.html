@@ -18,13 +18,13 @@
     <div class="toolbar toolbar-split">
       <div class="segmented" role="group" aria-label="Show">
         <a href="/?kind={{.KindFilter}}{{if .Query}}&q={{.Query}}{{end}}"
-           class="{{if not .AddedOnly}}active{{end}}">All</a>
-        <a href="/?kind={{.KindFilter}}{{if .Query}}&q={{.Query}}{{end}}&show=added"
            class="{{if .AddedOnly}}active{{end}}">Added</a>
+        <a href="/?kind={{.KindFilter}}{{if .Query}}&q={{.Query}}{{end}}&show=all"
+           class="{{if not .AddedOnly}}active{{end}}">All</a>
       </div>
       <div class="tabs">
         {{range .KindTabs}}
-        <a href="/?kind={{.Value}}{{if $.Query}}&q={{$.Query}}{{end}}{{if $.AddedOnly}}&show=added{{end}}"
+        <a href="/?kind={{.Value}}{{if $.Query}}&q={{$.Query}}{{end}}{{if not $.AddedOnly}}&show=all{{end}}"
            class="{{if eq .Value $.KindFilter}}active{{end}}">{{.Label}}</a>
         {{end}}
       </div>
@@ -34,7 +34,7 @@
            as a plain GET, for progressive enhancement. -->
       <form method="get" action="/" class="search-form">
         <input type="hidden" name="kind" id="search-kind" value="{{.KindFilter}}">
-        {{if .AddedOnly}}<input type="hidden" name="show" id="search-show" value="added">{{end}}
+        {{if not .AddedOnly}}<input type="hidden" name="show" id="search-show" value="all">{{end}}
         <input type="search" name="q" id="search-input" value="{{.Query}}"
                placeholder="Search provider or company…" autocomplete="off">
       </form>
@@ -112,7 +112,6 @@
   {{template "schedule-modal" .ScheduleModal}}
   <script id="provider-kinds-data" type="application/json">{{.ProviderKindsJSON}}</script>
 </main>
-{{template "footer"}}
 <script src="/static/app.js"></script>
 </body>
 </html>

@@ -55,7 +55,8 @@
         <select name="status" onchange="this.form.submit()">
           <option value="">All statuses</option>
           <option value="running" {{if eq .StatusFilter "running"}}selected{{end}}>Running</option>
-          <option value="done" {{if eq .StatusFilter "done"}}selected{{end}}>Done</option>
+          <option value="success" {{if eq .StatusFilter "success"}}selected{{end}}>Success</option>
+          <option value="partial" {{if eq .StatusFilter "partial"}}selected{{end}}>Partial</option>
           <option value="failed" {{if eq .StatusFilter "failed"}}selected{{end}}>Failed</option>
         </select>
         {{if not .CleanupView}}
@@ -92,7 +93,7 @@
     <div data-live-region>
     <table class="catalog-table" id="activity-table">
       <colgroup>
-        <col style="width: 24%"><col style="width: 14%"><col style="width: 14%"><col style="width: 24%"><col style="width: 24%">
+        <col style="width: 18%"><col style="width: 30%"><col style="width: 10%"><col style="width: 20%"><col style="width: 22%">
       </colgroup>
       <thead>
         <tr>
@@ -107,7 +108,11 @@
         {{range .Runs}}
         <tr class="run-row" data-run-id="{{.ID}}">
           <td>{{if .Provider}}{{.Provider}}{{else}}<span class="muted">—</span>{{end}}</td>
-          <td><span class="badge badge-{{.Status}} status-badge">{{.Status}}</span></td>
+          {{$o := .Outcome}}
+          <td>
+            <span class="badge badge-{{$o.Status}} status-badge">{{$o.Status}}</span>
+            <div class="cell-sub outcome-summary">{{$o.Summary}}</div>
+          </td>
           <td class="duration-cell">{{.Duration}}</td>
           <td><span class="pill pill-{{.Action}}">{{.Action}}</span>{{if .Label}} <span class="pill">{{.Label}}</span>{{end}}</td>
           <td><time datetime="{{iso .StartedAt}}" data-local>{{.StartedAt.UTC.Format "02/01/2006 - 15:04:05"}} UTC</time></td>
@@ -142,7 +147,6 @@ error: {{.Err}}{{end}}</pre>
     </div>
   </div>
 </main>
-{{template "footer"}}
 <script src="/static/app.js"></script>
 </body>
 </html>

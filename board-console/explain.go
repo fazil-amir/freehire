@@ -21,7 +21,7 @@ const explainSystemPrompt = `You explain runs of "Board Console", an internal op
 
 What the tool does: it keeps a catalog of job "boards" (a company's page on an ATS such as greenhouse/lever/ashby/adp/keka, an aggregator feed such as jobdanmark/bayt, or a company career site), adds them to freehire's database, crawls them, and rebuilds search. Each run on the Activity page is one of freehire's own command-line workers, started by a button, a schedule or the daily cleanup:
 - add-boards: inserts a provider's boards from the CSV catalog into the database. "duplicate" rows are boards already there — harmless.
-- ingest: crawls every board of ONE provider and stores the jobs. Boards are fetched 8 at a time. "progress N/M boards crawled" is a once-a-minute heartbeat; a single big board can show 0/1 for many minutes while it works. The run exits non-zero (shown as "failed") if ANY board failed, even when thousands of jobs were ingested — always read the "ingest done: ... ingested=N failed=M" line before calling a run broken. "ingest health: N unhealthy board(s)" lists boards across ALL providers that failed on recent runs (fails=count, cooled_until=time the board is skipped until); it is background information, not necessarily about this run. "in cooldown — skipping" means a board failed repeatedly and is paused until cooled_until.
+- ingest: crawls every board of ONE provider and stores the jobs. Boards are fetched 8 at a time. "progress N/M boards crawled" is a once-a-minute heartbeat; a single big board can show 0/1 for many minutes while it works. The program exits non-zero if ANY board failed, even when thousands of jobs were ingested, so the page shows an Outcome instead of the exit status: success, partial (jobs came in but some boards failed — the crawl worked), or failed (nothing came in, or the program itself broke). Use the Outcome you are given; never call a partial run a failure. "ingest health: N unhealthy board(s)" lists boards across ALL providers that failed on recent runs (fails=count, cooled_until=time the board is skipped until); it is background information, not necessarily about this run. "in cooldown — skipping" means a board failed repeatedly and is paused until cooled_until.
 - reindex: rebuilds the Meilisearch jobs index from the database. It refuses to start when free disk space is below REINDEX_MIN_FREE_GB ("disk-guard") — fix by freeing disk (docker builder prune / docker image prune) or lowering that floor; the index itself is small.
 - close-chronic-boards: the daily dead-board cleanup; closes (never deletes) jobs of boards unreachable for 60 days or empty for 30. "dry run" = Preview, changes nothing.
 - recount-companies / reindex-companies: recompute each company's open-job count, then rebuild company search.
@@ -163,8 +163,13 @@ func runContext(run *Run, history []*Run) string {
 	if provider == "" {
 		provider = "(none — catalogue-wide)"
 	}
-	fmt.Fprintf(&b, "\nProvider: %s\nStatus: %s\nDuration: %s\nStarted: %s\n",
-		provider, run.Status, run.Duration(), run.StartedAt.UTC().Format(time.RFC3339))
+	o := run.Outcome()
+	fmt.Fprintf(&b, "\nProvider: %s\nExit status: %s\nOutcome shown to the operator: %s",
+		provider, run.Status, o.Status)
+	if o.Summary != "" {
+		fmt.Fprintf(&b, " (%s)", o.Summary)
+	}
+	fmt.Fprintf(&b, "\nDuration: %s\nStarted: %s\n", run.Duration(), run.StartedAt.UTC().Format(time.RFC3339))
 	if run.Err != "" {
 		fmt.Fprintf(&b, "Exit error: %s\n", run.Err)
 	}

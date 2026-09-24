@@ -344,6 +344,22 @@ func (r *Runner) StartCrawl(provider string, reindexAfter, refetchAll bool, done
 	return true
 }
 
+// crawlOutcome is the Outcome status of provider's crawl that just
+// finished — the newest add-boards or ingest run for it, which is this
+// crawl's own, since a provider is never crawled twice at once. It falls
+// back to the exit error only when the activity log has no such run.
+func (r *Runner) crawlOutcome(provider string, err error) string {
+	for _, run := range r.activity.List() { // newest first
+		if run.Provider == provider && (run.Action == "ingest" || run.Action == "add-boards") {
+			return run.Outcome().Status
+		}
+	}
+	if err != nil {
+		return OutcomeFailed
+	}
+	return OutcomeSuccess
+}
+
 // RunBatch is "Add + Crawl Selected": each provider in order, then ONE
 // reindex at the end when reindexAfter is set. A provider already being
 // crawled elsewhere is skipped rather than crawled a second time alongside.

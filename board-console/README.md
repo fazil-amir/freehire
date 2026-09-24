@@ -242,9 +242,10 @@ and CSV/schedule management work regardless.
   expanded rows kept open. A "Reindex now" button sits in the header.
 - **Catalog is also the providers view**: each row joins the three stores —
   how fully the provider is added, its schedule if any (interval, next
-  run, paused), and its most recent activity run. The "Added" switch
-  (`?show=added`) narrows it to providers with at least one added board,
-  which is what the old Providers page showed; `/providers` redirects there.
+  run, paused), and its most recent activity run. It opens on "Added" —
+  providers with at least one added board, what the old Providers page
+  showed (`/providers` redirects there) — and "All" (`?show=all`) widens it
+  to the whole catalog.
 - **Search**: multi-word, order-independent — every word must appear
   somewhere across the provider and company text, so "green house" matches
   "Greenhouse" as readily as "greenhouse" does.

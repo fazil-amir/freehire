@@ -76,7 +76,7 @@ func TestScheduler_WaitsForAManualCrawlOfTheSameProvider(t *testing.T) {
 	<-manualDone
 	sched.runDue() // now free: the schedule runs
 	deadline := time.Now().Add(5 * time.Second)
-	for store.List()[0].LastStatus != "ok" && time.Now().Before(deadline) {
+	for store.List()[0].LastStatus != "success" && time.Now().Before(deadline) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	if got := countIngests(activity); got != 2 {
@@ -108,8 +108,8 @@ func TestScheduler_NeverOverlapsItselfAndStampsTheStart(t *testing.T) {
 	for store.List()[0].LastStatus == "running" && time.Now().Before(deadline) {
 		time.Sleep(50 * time.Millisecond)
 	}
-	if got := store.List()[0].LastStatus; got != "ok" {
-		t.Fatalf("want ok after the run, got %q", got)
+	if got := store.List()[0].LastStatus; got != "success" {
+		t.Fatalf("want success after the run, got %q", got)
 	}
 	if ingests := countIngests(activity); ingests != 1 {
 		t.Fatalf("want exactly 1 ingest while the first was in flight, got %d", ingests)

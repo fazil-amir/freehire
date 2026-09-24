@@ -105,9 +105,9 @@ func main() {
 	mux.HandleFunc("POST /bulk", requireAuth(app.sessions, handleBulkCrawl(app)))
 	mux.HandleFunc("POST /new-provider", requireAuth(app.sessions, handleNewProvider(app)))
 
-	// Providers was merged into Catalog as its "Added" filter; the old URL
-	// keeps working for bookmarks.
-	mux.Handle("GET /providers", http.RedirectHandler("/?show=added", http.StatusMovedPermanently))
+	// Providers was merged into Catalog as its "Added" view — now the
+	// default — and the old URL keeps working for bookmarks.
+	mux.Handle("GET /providers", http.RedirectHandler("/", http.StatusMovedPermanently))
 
 	mux.HandleFunc("GET /schedules", requireAuth(app.sessions, handleSchedules(app)))
 	mux.HandleFunc("POST /schedules/save", requireAuth(app.sessions, handleScheduleSave(app)))

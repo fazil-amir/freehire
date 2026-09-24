@@ -44,7 +44,8 @@
           <td>
             {{if .LastRun.IsZero}}<span class="muted">never</span>
             {{else}}
-              <span class="badge {{if eq .LastStatus "running"}}badge-running{{else if eq .LastStatus "ok"}}badge-done{{else}}badge-failed{{end}}">{{.LastStatus}}</span>
+              {{$st := .LastStatus}}{{if eq $st "ok"}}{{$st = "success"}}{{end}}
+              <span class="badge badge-{{if eq $st "interrupted"}}failed{{else}}{{$st}}{{end}}">{{$st}}</span>
               <div class="cell-sub"><time datetime="{{iso .LastRun}}" data-local>{{.LastRun.UTC.Format "02/01/2006 - 15:04:05"}} UTC</time></div>
             {{end}}
           </td>
@@ -81,7 +82,8 @@
             {{with .LatestRun}}
             <div class="run-detail-head">
               Latest crawl of {{.Provider}}: <span class="pill pill-{{.Action}}">{{.Action}}</span>
-              <span class="badge badge-{{.Status}}">{{.Status}}</span>
+              {{$o := .Outcome}}<span class="badge badge-{{$o.Status}}">{{$o.Status}}</span>
+              {{with $o.Summary}}<span>{{.}}</span> ·{{end}}
               <time datetime="{{iso .StartedAt}}" data-local>{{.StartedAt.UTC.Format "02/01/2006 - 15:04:05"}} UTC</time>
               · {{.Duration}}
             </div>
@@ -92,6 +94,11 @@ stderr:
 {{.Stderr}}
 {{if .Err}}
 error: {{.Err}}{{end}}</pre>
+            <div class="explain" data-explain-for="{{.ID}}">
+              {{with index $.Explanations .ID}}{{template "explain-answer" .}}
+              {{else}}<button type="button" class="btn btn-secondary btn-sm" data-explain="{{.ID}}"
+                      {{if not $.ExplainEnabled}}disabled title="Set OPENAI_API_KEY in .env to enable"{{end}}>✦ Explain this run</button>{{end}}
+            </div>
             {{else}}<span class="muted">No crawl of this provider in the activity log yet.</span>{{end}}
           </td>
         </tr>
@@ -104,7 +111,6 @@ error: {{.Err}}{{end}}</pre>
 
   {{template "schedule-modal" .ScheduleModal}}
 </main>
-{{template "footer"}}
 <script src="/static/app.js"></script>
 </body>
 </html>

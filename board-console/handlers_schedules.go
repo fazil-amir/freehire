@@ -57,6 +57,9 @@ type schedulesPageData struct {
 	Schedules     []scheduleRow
 	DBError       string // set when the provider list fell back to the CSV's stale column
 	ScheduleModal scheduleModal
+
+	ExplainEnabled bool           // see activityPageData
+	Explanations   map[int]string // cached answers by run ID
 }
 
 func buildSchedulesPageData(app *App, r *http.Request) schedulesPageData {
@@ -95,6 +98,9 @@ func buildSchedulesPageData(app *App, r *http.Request) schedulesPageData {
 		Schedules:     rows,
 		DBError:       dbError,
 		ScheduleModal: newScheduleModal(knownProviders),
+
+		ExplainEnabled: app.explainer.Enabled(),
+		Explanations:   app.explainer.Cached(),
 	}
 }
 

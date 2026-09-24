@@ -26,7 +26,10 @@ type Schedule struct {
 	ReindexAfter bool      `json:"reindex_after"`
 	Enabled      bool      `json:"enabled"`
 	LastRun      time.Time `json:"last_run,omitzero"`
-	LastStatus   string    `json:"last_status,omitempty"` // "running" / "ok" / "failed" / "interrupted"
+	// "running", then the finished crawl's Outcome status — "success" /
+	// "partial" / "failed" — or "interrupted". Files written before Outcome
+	// existed hold "ok", which reads as "success".
+	LastStatus string `json:"last_status,omitempty"`
 }
 
 func (s Schedule) Interval() time.Duration {
@@ -265,17 +268,13 @@ func (s *ScheduleStore) restoreRun(id string, lastRun time.Time, status string) 
 	}
 }
 
-// recordRun stamps the result of a finished run and persists. LastRun is
+// recordRun stamps the outcome of a finished run and persists. LastRun is
 // left at the start markStarted recorded.
-func (s *ScheduleStore) recordRun(id string, err error) {
+func (s *ScheduleStore) recordRun(id, status string) {
 	s.mu.Lock()
 	for i := range s.schedules {
 		if s.schedules[i].ID == id {
-			if err != nil {
-				s.schedules[i].LastStatus = "failed"
-			} else {
-				s.schedules[i].LastStatus = "ok"
-			}
+			s.schedules[i].LastStatus = status
 			break
 		}
 	}
@@ -349,12 +348,12 @@ func (s *Scheduler) runDue() {
 			continue
 		}
 		s.store.markStarted(sch.ID, now)
-		id := sch.ID
+		id, provider := sch.ID, sch.Provider
 		started := s.runner.StartCrawl(sch.Provider, sch.ReindexAfter, false, func(err error) {
 			if err != nil {
-				log.Printf("scheduler: %s failed: %v", id, err)
+				log.Printf("scheduler: %s: %v", id, err)
 			}
-			s.store.recordRun(id, err)
+			s.store.recordRun(id, s.runner.crawlOutcome(provider, err))
 		})
 		if !started {
 			// A crawl of this provider began between the check and the claim:

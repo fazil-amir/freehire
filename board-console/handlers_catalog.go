@@ -31,8 +31,9 @@ type ProviderSummary struct {
 	NextRun         time.Time
 	ReindexAfter    bool
 
-	LastRunAt     time.Time
-	LastRunStatus RunStatus
+	LastRunAt      time.Time
+	LastRunStatus  string // the run's Outcome status (success / partial / failed)
+	LastRunSummary string // the Outcome's one-line result
 
 	// Crawling is true from the instant a crawl of this provider is claimed
 	// (Runner.Crawling) — before its first Activity row exists — so the row
@@ -160,7 +161,7 @@ type catalogPageData struct {
 	Active     string
 	Providers  []ProviderSummary
 	KindFilter string
-	AddedOnly  bool // ?show=added — what used to be the separate Providers page
+	AddedOnly  bool // the default view (added providers only); ?show=all widens it to the whole catalog
 	Query      string
 	Page       int
 	TotalPages int
@@ -186,7 +187,9 @@ type catalogPageData struct {
 func buildCatalogPageData(app *App, r *http.Request) catalogPageData {
 	q := r.URL.Query()
 	kindFilter := q.Get("kind")
-	addedOnly := q.Get("show") == "added"
+	// Added is the default; only ?show=all widens to the whole catalog (so an
+	// old ?show=added link still lands on Added).
+	addedOnly := q.Get("show") != "all"
 	query := q.Get("q")
 	page, _ := strconv.Atoi(q.Get("page"))
 	if page < 1 {
@@ -291,8 +294,9 @@ func attachRunState(app *App, rows []ProviderSummary) {
 			d.ReindexAfter = s.ReindexAfter
 		}
 		if run, ok := lastRunByProvider[d.Provider]; ok {
+			o := run.Outcome()
 			d.LastRunAt = run.StartedAt
-			d.LastRunStatus = run.Status
+			d.LastRunStatus, d.LastRunSummary = o.Status, o.Summary
 		}
 	}
 }

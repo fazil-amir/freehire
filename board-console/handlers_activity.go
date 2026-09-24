@@ -126,7 +126,9 @@ func filterRuns(all []*Run, f activityFilters) []*Run {
 	}
 	var out []*Run
 	for _, run := range all {
-		if f.status != "" && string(run.Status) != f.status {
+		// The status filter is on the Outcome the page shows (success /
+		// partial / failed), not the raw exit status.
+		if f.status != "" && run.Outcome().Status != f.status {
 			continue
 		}
 		if f.action != "" && run.Action != f.action {
@@ -177,7 +179,8 @@ func handleActivity(app *App) http.HandlerFunc {
 // open) in place, without a full reload, while a run is still going.
 type runStatusJSON struct {
 	ID       int    `json:"id"`
-	Status   string `json:"status"`
+	Status   string `json:"status"`  // the Outcome's status, as the badge shows it
+	Summary  string `json:"summary"` // the Outcome's one-line result
 	Duration string `json:"duration"`
 	Stdout   string `json:"stdout"`
 	Stderr   string `json:"stderr"`
@@ -196,7 +199,8 @@ func handleActivityStatus(app *App) http.HandlerFunc {
 		for i, run := range runs {
 			out[i] = runStatusJSON{
 				ID:       run.ID,
-				Status:   string(run.Status),
+				Status:   run.Outcome().Status,
+				Summary:  run.Outcome().Summary,
 				Duration: run.Duration().String(),
 				Stdout:   run.Stdout,
 				Stderr:   run.Stderr,
