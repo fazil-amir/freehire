@@ -42,11 +42,11 @@
             {{else}}<time datetime="{{iso .NextRun}}" data-local>{{.NextRun.UTC.Format "02/01/2006 - 15:04:05"}} UTC</time>{{end}}
           </td>
           <td>
-            {{if .LastRun.IsZero}}<span class="muted">never</span>
+            {{$lc := .LastCrawl}}
+            {{if $lc.At.IsZero}}<span class="muted">never</span>
             {{else}}
-              {{$st := .LastStatus}}{{if eq $st "ok"}}{{$st = "success"}}{{end}}
-              <span class="badge badge-{{if eq $st "interrupted"}}failed{{else}}{{$st}}{{end}}">{{$st}}</span>
-              <div class="cell-sub"><time datetime="{{iso .LastRun}}" data-local>{{.LastRun.UTC.Format "02/01/2006 - 15:04:05"}} UTC</time></div>
+              <span class="badge badge-{{$lc.Badge}}" {{with $lc.Summary}}title="{{.}}"{{end}}>{{$lc.Status}}</span>
+              <div class="cell-sub"><time datetime="{{iso $lc.At}}" data-local>{{$lc.At.UTC.Format "02/01/2006 - 15:04:05"}} UTC</time></div>
             {{end}}
           </td>
           <td>{{if .ReindexAfter}}<span class="pill pill-reindex">reindex</span>{{else}}<span class="muted">—</span>{{end}}</td>
@@ -68,7 +68,9 @@
                    data-interval-value="{{.IntervalValue}}" data-interval-unit="{{.IntervalUnit}}"
                    data-reindex-after="{{.ReindexAfter}}">Edit</a>
                 <form method="post" action="/schedules/delete" data-async data-refresh
-                      data-confirm="Delete the schedule for {{.Provider}}?"
+                      data-confirm-title="Delete schedule?"
+                      data-confirm="{{.Provider}} will no longer be crawled automatically. Its jobs and past runs stay; you can add a schedule again any time."
+                      data-confirm-label="Delete" data-confirm-danger
                       data-done="Schedule for {{.Provider}} deleted">
                   <input type="hidden" name="id" value="{{.ID}}">
                   <button type="submit" class="kebab-item danger">Delete</button>

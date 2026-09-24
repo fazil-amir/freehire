@@ -49,10 +49,15 @@ const activityPersistThrottle = 10 * time.Second
 
 // Run is one recorded subprocess invocation shown on the Activity page.
 type Run struct {
-	ID         int
-	Action     string // "add-boards" / "ingest" / "reindex" / "close-chronic-boards"
-	Provider   string // empty for reindex and close-chronic-boards
-	Label      string // shown beside the action, e.g. "dry run"; usually empty
+	ID       int
+	Action   string // "add-boards" / "ingest" / "reindex" / "close-chronic-boards"
+	Provider string // empty for reindex and close-chronic-boards
+	Label    string // shown beside the action, e.g. "dry run"; usually empty
+	// Jobs are the job(s) this run is a step of — one crawl, cleanup, ... as
+	// the operator asked for it (see jobs.go). Usually one; a reindex that
+	// served several crawls at once belongs to each. Empty for runs recorded
+	// before jobs existed, which show as single-step jobs.
+	Jobs       []int `json:",omitempty"`
 	Status     RunStatus
 	Stdout     string
 	Stderr     string
@@ -77,6 +82,7 @@ type ActivityLog struct {
 	mu        sync.Mutex
 	runs      []*Run
 	nextID    int
+	nextJob   int
 	maxRuns   int
 	file      *os.File
 	path      string
@@ -99,6 +105,11 @@ func NewActivityLog(dataDir string, maxRuns int) (*ActivityLog, error) {
 	}
 
 	a := &ActivityLog{runs: runs, nextID: maxID, maxRuns: maxRuns, file: f, path: path, lineCount: lineCount}
+	for _, r := range runs {
+		for _, j := range r.Jobs {
+			a.nextJob = max(a.nextJob, j)
+		}
+	}
 
 	// A run still "running" OR "queued" in the file means the process was
 	// killed or crashed mid-run (or mid-wait — the concurrency queue only
@@ -122,25 +133,34 @@ func NewActivityLog(dataDir string, maxRuns int) (*ActivityLog, error) {
 
 // Start records a new running entry and returns it so the caller can stream
 // output into it and call Finish.
-func (a *ActivityLog) Start(action, provider string) *Run {
-	return a.start(action, provider, "", StatusRunning)
+func (a *ActivityLog) Start(action, provider string, jobs ...int) *Run {
+	return a.start(action, provider, "", StatusRunning, jobs)
+}
+
+// NewJob hands out the next job ID — one per thing the operator (or a
+// schedule) asked for; its steps are the runs started with it.
+func (a *ActivityLog) NewJob() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.nextJob++
+	return a.nextJob
 }
 
 // StartLabeled is Start with a label shown beside the action on the
 // Activity page (a Preview's "dry run").
-func (a *ActivityLog) StartLabeled(action, provider, label string) *Run {
-	return a.start(action, provider, label, StatusRunning)
+func (a *ActivityLog) StartLabeled(action, provider, label string, jobs ...int) *Run {
+	return a.start(action, provider, label, StatusRunning, jobs)
 }
 
 // StartQueued records a new entry as "queued" rather than "running" —
 // visible the instant an action is requested, even if it then has to wait
 // for a concurrency slot (see Runner's ingest semaphore). Call MarkRunning
 // once that slot is actually acquired.
-func (a *ActivityLog) StartQueued(action, provider, label string) *Run {
-	return a.start(action, provider, label, StatusQueued)
+func (a *ActivityLog) StartQueued(action, provider, label string, jobs ...int) *Run {
+	return a.start(action, provider, label, StatusQueued, jobs)
 }
 
-func (a *ActivityLog) start(action, provider, label string, status RunStatus) *Run {
+func (a *ActivityLog) start(action, provider, label string, status RunStatus, jobs []int) *Run {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.nextID++
@@ -149,6 +169,7 @@ func (a *ActivityLog) start(action, provider, label string, status RunStatus) *R
 		Action:      action,
 		Provider:    provider,
 		Label:       label,
+		Jobs:        jobs,
 		Status:      status,
 		StartedAt:   time.Now(),
 		lastPersist: time.Now(),

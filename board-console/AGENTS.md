@@ -120,6 +120,10 @@ board-console/
   reindex, reindex-companies). freehire guards them with an advisory lock
   that makes the loser SKIP and exit 0, so without the mutex a company
   refresh during a reindex would silently do nothing.
+- **"Remove provider" retires through freehire's own `add-board --retire`**,
+  one call per board, never by writing SQL — the isolation contract holds.
+  It must also delete the provider's schedules: a crawl adds whatever boards
+  are missing, so a surviving schedule would silently re-add them all.
 - **`ActivityLog.List()` returns snapshot copies.** Running Runs are written
   by their subprocess goroutine; never hand a live `*Run` to a page.
 - **Every page's "added" figure goes through `resolveAddedCounts` in

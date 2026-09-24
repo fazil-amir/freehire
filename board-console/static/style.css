@@ -459,6 +459,7 @@ table.catalog-table tbody tr.run-detail:hover { background: none; }
 .pill-reindex { background: var(--pill-reindex-muted); color: var(--pill-reindex); }
 .pill-close-chronic-boards { background: var(--pill-cleanup-muted); color: var(--pill-cleanup); }
 .pill-recount-companies, .pill-reindex-companies { background: var(--pill-companies-muted); color: var(--pill-companies); }
+.pill-remove-boards { background: var(--danger-muted); color: var(--danger); }
 
 /* Activity's Cleanup tab: last/next run in the toolbar's end slot. */
 .cleanup-status { display: flex; align-items: center; gap: 8px; font-size: 13px; white-space: nowrap; }
@@ -542,6 +543,7 @@ dialog h2 { margin: 0; font-size: 18px; letter-spacing: -0.01em; }
   background: rgba(30, 31, 35, 0.5);
   border-radius: 0 0 var(--radius-xl) var(--radius-xl);
 }
+.confirm-message { margin: 0; font-size: 14px; line-height: 1.6; color: var(--text-muted); }
 .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 @media (max-width: 560px) { .field-grid { grid-template-columns: 1fr; } }
 .dialog-help { font-size: 12px; color: var(--text-muted); }
@@ -665,6 +667,23 @@ code {
 
 /* --- activity --- */
 .run-row { cursor: pointer; }
+
+/* A job row (click for its steps) and its step rows, indented under it. */
+.job-row { cursor: pointer; }
+.job-chevron {
+  display: inline-block;
+  width: 14px;
+  margin-right: 6px;
+  color: var(--text-faint);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+.job-row.open .job-chevron { transform: rotate(90deg); color: var(--accent); }
+.job-row.open { background: rgba(220, 217, 219, 0.03); }
+.step-row > td { background: rgba(30, 31, 35, 0.35); padding-top: 10px; padding-bottom: 10px; }
+.step-cell { padding-left: 28px !important; }
+.step-branch { color: var(--text-faint); margin-right: 8px; }
+.step-pills { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.pill-sm { font-size: 11px; padding: 0 7px; line-height: 1.6; }
 .run-detail > td { background: rgba(30, 31, 35, 0.35); }
 .run-output {
   margin: 0;

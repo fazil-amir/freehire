@@ -30,6 +30,29 @@ type Schedule struct {
 	// "partial" / "failed" — or "interrupted". Files written before Outcome
 	// existed hold "ok", which reads as "success".
 	LastStatus string `json:"last_status,omitempty"`
+
+	// LastFinished is when the schedule's OWN last run ended, whatever its
+	// outcome — so a failing provider waits a full interval, not a minute.
+	LastFinished time.Time `json:"last_finished,omitzero"`
+	// LastCrawlEnd is when the provider's last crawl that got something done
+	// (success or partial) ended, whoever started it — a Crawl click, a bulk
+	// run or this schedule. It is what stops a schedule re-crawling a
+	// provider that was crawled by hand a minute ago.
+	LastCrawlEnd time.Time `json:"last_crawl_end,omitzero"`
+}
+
+// clockStart is when the schedule's interval is counted from: the latest of
+// its own run's start, its own run's end, and the provider's last good
+// crawl's end. Files written before the two end stamps existed only have
+// LastRun, which the max simply falls back to.
+func (s Schedule) clockStart() time.Time {
+	t := s.LastRun
+	for _, c := range []time.Time{s.LastFinished, s.LastCrawlEnd} {
+		if c.After(t) {
+			t = c
+		}
+	}
+	return t
 }
 
 func (s Schedule) Interval() time.Duration {
@@ -46,17 +69,18 @@ func (s Schedule) Interval() time.Duration {
 // a real schedule, and the template renders it as "due now" rather than
 // formatting it.
 func (s Schedule) NextRun() time.Time {
-	if s.LastRun.IsZero() {
+	start := s.clockStart()
+	if start.IsZero() {
 		return time.Time{}
 	}
-	return s.LastRun.Add(s.Interval())
+	return start.Add(s.Interval())
 }
 
 func (s Schedule) Due(now time.Time) bool {
 	if !s.Enabled {
 		return false
 	}
-	if s.LastRun.IsZero() {
+	if s.clockStart().IsZero() {
 		return true // never run — due immediately
 	}
 	return !now.Before(s.NextRun())
@@ -216,6 +240,26 @@ func (s *ScheduleStore) Delete(id string) error {
 	return s.save()
 }
 
+// DeleteByProvider removes every schedule of provider and reports how many.
+func (s *ScheduleStore) DeleteByProvider(provider string) (int, error) {
+	s.mu.Lock()
+	kept := s.schedules[:0:0]
+	removed := 0
+	for _, sch := range s.schedules {
+		if sch.Provider == provider {
+			removed++
+			continue
+		}
+		kept = append(kept, sch)
+	}
+	s.schedules = kept
+	s.mu.Unlock()
+	if removed == 0 {
+		return 0, nil
+	}
+	return removed, s.save()
+}
+
 func (s *ScheduleStore) Toggle(id string) error {
 	s.mu.Lock()
 	found := false
@@ -270,17 +314,43 @@ func (s *ScheduleStore) restoreRun(id string, lastRun time.Time, status string) 
 
 // recordRun stamps the outcome of a finished run and persists. LastRun is
 // left at the start markStarted recorded.
-func (s *ScheduleStore) recordRun(id, status string) {
+func (s *ScheduleStore) recordRun(id, status string, finishedAt time.Time) {
 	s.mu.Lock()
 	for i := range s.schedules {
 		if s.schedules[i].ID == id {
 			s.schedules[i].LastStatus = status
+			s.schedules[i].LastFinished = finishedAt
 			break
 		}
 	}
 	s.mu.Unlock()
 	if err := s.save(); err != nil {
 		log.Printf("schedule store: persist after run: %v", err)
+	}
+}
+
+// RecordProviderCrawl stamps LastCrawlEnd on every schedule of provider when
+// a crawl of it — from any source — ended with jobs to show for it. A crawl
+// that failed outright stamps nothing: it must not push the next real
+// crawl a whole interval away.
+func (s *ScheduleStore) RecordProviderCrawl(provider string, finishedAt time.Time, outcome string) {
+	if outcome != OutcomeSuccess && outcome != OutcomePartial {
+		return
+	}
+	s.mu.Lock()
+	changed := false
+	for i := range s.schedules {
+		if s.schedules[i].Provider == provider && finishedAt.After(s.schedules[i].LastCrawlEnd) {
+			s.schedules[i].LastCrawlEnd = finishedAt
+			changed = true
+		}
+	}
+	s.mu.Unlock()
+	if !changed {
+		return
+	}
+	if err := s.save(); err != nil {
+		log.Printf("schedule store: persist crawl end: %v", err)
 	}
 }
 
@@ -353,7 +423,7 @@ func (s *Scheduler) runDue() {
 			if err != nil {
 				log.Printf("scheduler: %s: %v", id, err)
 			}
-			s.store.recordRun(id, s.runner.crawlOutcome(provider, err))
+			s.store.recordRun(id, s.runner.crawlOutcome(provider, err), time.Now().Round(0))
 		})
 		if !started {
 			// A crawl of this provider began between the check and the claim:

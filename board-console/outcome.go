@@ -30,6 +30,7 @@ var (
 	addDoneRe      = regexp.MustCompile(`bulk-add-boards: done\. added=(\d+) duplicate=(\d+) failed=(\d+)`)
 	reindexDoneRe  = regexp.MustCompile(`reindex(?:-companies)? done: .*\bindexed=(\d+)`)
 	recountDoneRe  = regexp.MustCompile(`recount-companies done: companies updated=(\d+)`)
+	removeDoneRe   = regexp.MustCompile(`remove-boards: done\. retired=(\d+) failed=(\d+) schedules_deleted=(\d+)`)
 	cleanupJobsRe  = regexp.MustCompile(`close-chronic-boards: \d+ .*?(would close|closed) (\d+) job\(s\) total`)
 	logTimestampRe = regexp.MustCompile(`^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2} `)
 )
@@ -66,6 +67,24 @@ func (r *Run) Outcome() RunOutcome {
 				return RunOutcome{Status: OutcomePartial, Summary: jobs + " · " + boards}
 			}
 			return RunOutcome{Status: OutcomeFailed, Summary: "0 jobs · " + boards}
+		}
+	}
+
+	if r.Action == "remove-boards" {
+		if m := lastMatch(removeDoneRe, r.Stderr); m != nil {
+			retired, failed, schedules := atoi(m[1]), atoi(m[2]), atoi(m[3])
+			s := plural(retired, "board", "boards") + " retired"
+			if schedules > 0 {
+				s += " · " + plural(schedules, "schedule", "schedules") + " deleted"
+			}
+			switch {
+			case failed == 0:
+				return RunOutcome{Status: OutcomeSuccess, Summary: s}
+			case retired > 0:
+				return RunOutcome{Status: OutcomePartial, Summary: s + " · " + strconv.Itoa(failed) + " failed"}
+			default:
+				return RunOutcome{Status: OutcomeFailed, Summary: "0 boards retired · " + strconv.Itoa(failed) + " failed"}
+			}
 		}
 	}
 

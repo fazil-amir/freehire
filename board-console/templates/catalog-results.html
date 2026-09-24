@@ -44,13 +44,20 @@
           <button type="button" class="kebab-btn" data-kebab-toggle aria-label="Actions for {{.Provider}}">⋮</button>
           <div class="kebab-menu" hidden>
             <form method="post" action="/crawl" data-async data-refresh
+                  {{if and .FullyAdded .RecentCrawl}}
+                  data-confirm-title="Crawl again?"
+                  data-confirm="{{.Provider}} was crawled {{.RecentCrawl}}{{if .HasSchedule}} and is scheduled every {{.Interval}}{{end}}. Crawling it again this soon mostly re-fetches the same jobs and adds load on the source."
+                  data-confirm-label="Crawl again"
+                  {{end}}
                   data-done="{{if .FullyAdded}}Crawl{{else}}Add + crawl{{end}} started for {{.Provider}}">
               <input type="hidden" name="provider" value="{{.Provider}}">
               <button type="submit" class="kebab-item">{{if .FullyAdded}}Crawl{{else}}Add + Crawl{{end}}</button>
             </form>
             {{if gt .AddedCount 0}}
             <form method="post" action="/crawl" data-async data-refresh
-                  data-confirm="Full re-crawl of {{.Provider}}? Every stored posting is re-fetched and re-written, not just new ones — one request per posting, so a large provider takes a long time. Use it after an adapter fix."
+                  data-confirm-title="Full re-crawl of {{.Provider}}?"
+                  data-confirm="Every stored posting is re-fetched and re-written, not just new ones — one request per posting, so a large provider takes a long time. Use it after an adapter fix."
+                  data-confirm-label="Re-crawl"
                   data-done="Full re-crawl started for {{.Provider}}">
               <input type="hidden" name="provider" value="{{.Provider}}">
               <input type="hidden" name="refetch" value="1">
@@ -67,7 +74,9 @@
                data-interval-value="{{.IntervalValue}}" data-interval-unit="{{.IntervalUnit}}"
                data-reindex-after="{{.ReindexAfter}}">Edit schedule</a>
             <form method="post" action="/schedules/delete" data-async data-refresh
-                  data-confirm="Delete the schedule for {{.Provider}}?"
+                  data-confirm-title="Delete schedule?"
+                  data-confirm="{{.Provider}} will no longer be crawled automatically. Its jobs and past runs stay; you can add a schedule again any time."
+                  data-confirm-label="Delete" data-confirm-danger
                   data-done="Schedule for {{.Provider}} deleted">
               <input type="hidden" name="id" value="{{.ScheduleID}}">
               <button type="submit" class="kebab-item danger">Delete schedule</button>
@@ -75,6 +84,17 @@
             {{else}}
             <a class="kebab-item" href="/schedules?open=add&provider={{.Provider}}"
                data-schedule-open data-provider="{{.Provider}}">Add schedule</a>
+            {{end}}
+            {{if gt .AddedCount 0}}
+            <div class="kebab-sep"></div>
+            <form method="post" action="/providers/remove" data-async data-refresh
+                  data-confirm-title="Remove {{.Provider}}?"
+                  data-confirm="Its {{.AddedCount}} board(s) are retired and it stops being crawled{{if .HasSchedule}}, and its schedule is deleted{{end}}. Its jobs stay as they are, and Add + Crawl brings it back."
+                  data-confirm-label="Remove" data-confirm-danger
+                  data-done="Removing {{.Provider}} — see Activity for progress">
+              <input type="hidden" name="provider" value="{{.Provider}}">
+              <button type="submit" class="kebab-item danger">Remove provider</button>
+            </form>
             {{end}}
           </div>
         </div>

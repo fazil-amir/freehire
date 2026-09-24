@@ -30,10 +30,54 @@ type scheduleRow struct {
 	// activity log, scheduled or manual — the expandable output under the
 	// row. Nil when the log holds none.
 	LatestRun *Run
+	// Crawling: a crawl of this provider is in flight right now, whoever
+	// started it (this schedule, a Crawl click, a bulk run).
+	Crawling bool
 }
 
-// Running reports whether this schedule's own run is in flight.
-func (r scheduleRow) Running() bool { return r.LastStatus == "running" }
+// Running reports whether the row should read as running: its own run, or
+// any other crawl of the same provider, is in flight.
+func (r scheduleRow) Running() bool { return r.LastStatus == "running" || r.Crawling }
+
+// lastCrawlView is what the Last run cell shows.
+type lastCrawlView struct {
+	Status  string // badge text: running / success / partial / failed / interrupted
+	Badge   string // badge class suffix
+	Summary string
+	At      time.Time // zero: never run
+}
+
+// LastCrawl is the provider's most recent crawl, however it was started —
+// the schedule's own record and the activity log's newest crawl, whichever
+// is newer. A schedule's own record alone went stale the moment the
+// provider was crawled by hand: after a restart cut the scheduled run off
+// it kept saying "interrupted" beside a manual crawl that was running.
+func (r scheduleRow) LastCrawl() lastCrawlView {
+	latest := r.LatestRun
+	if r.Running() {
+		at := r.LastRun
+		if latest != nil && latest.StartedAt.After(at) {
+			at = latest.StartedAt
+		}
+		return lastCrawlView{Status: "running", Badge: "running", At: at}
+	}
+	if latest != nil && !latest.StartedAt.Before(r.LastRun) {
+		o := latest.Outcome()
+		return lastCrawlView{Status: o.Status, Badge: o.Status, Summary: o.Summary, At: latest.StartedAt}
+	}
+	if r.LastRun.IsZero() {
+		return lastCrawlView{}
+	}
+	status := r.LastStatus
+	if status == "ok" { // files written before Outcome existed
+		status = OutcomeSuccess
+	}
+	badge := status
+	if status == "interrupted" {
+		badge = OutcomeFailed
+	}
+	return lastCrawlView{Status: status, Badge: badge, At: r.LastRun}
+}
 
 // scheduleModal is the shared add/edit schedule dialog's state — the
 // "schedule-modal" template, rendered by every page that can add or edit a
@@ -81,6 +125,7 @@ func buildSchedulesPageData(app *App, r *http.Request) schedulesPageData {
 			Schedule: s, NextRun: s.NextRun(), Interval: formatInterval(s.Interval()),
 			IntervalValue: value, IntervalUnit: unit,
 			LatestRun: latest[s.Provider],
+			Crawling:  app.runner.Crawling(s.Provider),
 		})
 	}
 

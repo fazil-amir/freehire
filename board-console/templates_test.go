@@ -19,7 +19,7 @@ func TestTemplates_EveryPageRenders(t *testing.T) {
 		"login":     map[string]any{"Error": ""},
 		"catalog":   catalogPageData{Active: "catalog", Providers: []ProviderSummary{{Provider: "acme", CompanyCount: 1}}},
 		"schedules": schedulesPageData{Active: "schedules", Schedules: []scheduleRow{{Schedule: Schedule{ID: "s", Provider: "acme"}, LatestRun: run}}, Explanations: map[int]string{1: "Why: because."}},
-		"activity":  activityPageData{Active: "activity", Runs: []*Run{run}, Explanations: map[int]string{}},
+		"activity":  activityPageData{Active: "activity", Jobs: buildJobs([]*Run{run}), Explanations: map[int]string{}},
 	}
 	for name, data := range pages {
 		var b strings.Builder

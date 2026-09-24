@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"log"
 	"net/http"
 	"sort"
 	"strconv"
@@ -34,6 +35,11 @@ type ProviderSummary struct {
 	LastRunAt      time.Time
 	LastRunStatus  string // the run's Outcome status (success / partial / failed)
 	LastRunSummary string // the Outcome's one-line result
+
+	// RecentCrawl ("4 minutes ago") is set when the provider's last good
+	// crawl ended inside its window — see recentCrawlWindow — so the Crawl
+	// item asks before crawling it again.
+	RecentCrawl string
 
 	// Crawling is true from the instant a crawl of this provider is claimed
 	// (Runner.Crawling) — before its first Activity row exists — so the row
@@ -271,7 +277,9 @@ func attachRunState(app *App, rows []ProviderSummary) {
 
 	// Most recent run per provider — List() is already newest-first, so the
 	// first match for a provider is its most recent run of any kind.
+	// And the most recent crawl that got something done, for RecentCrawl.
 	lastRunByProvider := map[string]*Run{}
+	lastGoodCrawl := map[string]*Run{}
 	for _, run := range app.activity.List() {
 		if run.Provider == "" {
 			continue
@@ -279,7 +287,13 @@ func attachRunState(app *App, rows []ProviderSummary) {
 		if _, ok := lastRunByProvider[run.Provider]; !ok {
 			lastRunByProvider[run.Provider] = run
 		}
+		if _, ok := lastGoodCrawl[run.Provider]; !ok && run.Action == "ingest" {
+			if o := run.Outcome().Status; o == OutcomeSuccess || o == OutcomePartial {
+				lastGoodCrawl[run.Provider] = run
+			}
+		}
 	}
+	now := time.Now()
 
 	for i := range rows {
 		d := &rows[i]
@@ -298,6 +312,36 @@ func attachRunState(app *App, rows []ProviderSummary) {
 			d.LastRunAt = run.StartedAt
 			d.LastRunStatus, d.LastRunSummary = o.Status, o.Summary
 		}
+		if run, ok := lastGoodCrawl[d.Provider]; ok {
+			window := recentCrawlWindow
+			if s, ok := scheduleByProvider[d.Provider]; ok {
+				window = s.Interval()
+			}
+			if since := now.Sub(run.FinishedAt); since < window {
+				d.RecentCrawl = agoText(since)
+			}
+		}
+	}
+}
+
+// recentCrawlWindow is how recent a crawl of an UNSCHEDULED provider must be
+// for a manual Crawl to ask first; a scheduled one uses its interval.
+const recentCrawlWindow = 30 * time.Minute
+
+// agoText renders a short duration as "just now" / "4 minutes ago" /
+// "2 hours ago".
+func agoText(d time.Duration) string {
+	switch m := int(d.Minutes()); {
+	case m < 1:
+		return "just now"
+	case m == 1:
+		return "1 minute ago"
+	case m < 60:
+		return fmt.Sprintf("%d minutes ago", m)
+	case m < 120:
+		return "1 hour ago"
+	default:
+		return fmt.Sprintf("%d hours ago", m/60)
 	}
 }
 
@@ -364,7 +408,42 @@ func handleCrawl(app *App) http.HandlerFunc {
 // right after it, rather than starting a redundant second one.
 func handleReindexNow(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		app.runner.queueReindex()
+		app.runner.queueReindex(app.activity.NewJob())
+		actionDone(w, r, "/")
+	}
+}
+
+// handleRemoveProvider is the Catalog menu's "Remove provider": retire all
+// of the provider's live boards (see Runner.StartRemoveProvider) and drop
+// its schedules. The board list comes from the database, so it is refused
+// when that is unreachable rather than retiring only what the CSV knows.
+func handleRemoveProvider(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		provider := r.FormValue("provider")
+		if provider == "" {
+			http.Error(w, "provider required", http.StatusBadRequest)
+			return
+		}
+		if app.db == nil {
+			actionError(w, http.StatusServiceUnavailable, "The database is not configured, so the boards to retire are unknown.")
+			return
+		}
+		boards, err := app.db.LiveBoards(r.Context(), provider)
+		if err != nil {
+			actionError(w, http.StatusServiceUnavailable, "Could not read "+provider+"'s boards from the database: "+err.Error())
+			return
+		}
+		deleteSchedules := func() int {
+			n, err := app.schedules.DeleteByProvider(provider)
+			if err != nil {
+				log.Printf("remove %s: delete schedules: %v", provider, err)
+			}
+			return n
+		}
+		if !app.runner.StartRemoveProvider(provider, boards, deleteSchedules) {
+			actionError(w, http.StatusConflict, provider+" is being crawled right now — remove it once that finishes.")
+			return
+		}
 		actionDone(w, r, "/")
 	}
 }

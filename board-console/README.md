@@ -219,8 +219,16 @@ and CSV/schedule management work regardless.
   goroutine, so a slow crawl never delays another schedule, but a schedule
   never overlaps ITSELF — while its run is in flight it is skipped, and if
   the run outlasted its interval it starts again on the next tick. The
-  interval is measured from a run's START, which is stamped (status
-  `running`) the moment it begins; the Schedules page refreshes itself while
+  interval counts from when the provider was last crawled to good effect —
+  the END of its last success/partial crawl from ANY source (a Crawl
+  click, a bulk run, the schedule itself) — so a manual crawl satisfies the
+  schedule instead of being followed by a second crawl a minute later. A
+  crawl that failed outright does not reset it, except the schedule's own
+  run (otherwise a failing provider would be retried every minute). A
+  manual Crawl on a provider crawled within its interval (30 min if
+  unscheduled) asks first, in Board Console's own confirmation dialog —
+  the one every confirmation uses; nothing calls the browser's confirm().
+  A run's start is stamped (status `running`) the moment it begins; the Schedules page refreshes itself while
   a run is in flight, and each row expands to its provider's latest crawl
   output. A host that sleeps (a laptop) pauses all of this — the tick and
   the 30-minute subprocess timeout alike — so a missed slot there is the
@@ -235,9 +243,19 @@ and CSV/schedule management work regardless.
   still-running command's output). Survives a restart.
 - **Live logs**: a run's stdout/stderr streams into the Activity page while
   it's still going — expand a row to watch it grow, polled every 2s.
+- **Activity lists jobs, not runs** (`jobs.go`): one row per thing asked
+  for — a Crawl (add-boards → ingest → reindex), a Cleanup (close-chronic-
+  boards → reindex → recount → reindex-companies), a Reindex, … — opened to
+  show its steps, each with its log. Every run records its job(s) (`Run.Jobs`);
+  a reindex that served several crawls at once belongs to each and says
+  "shared with …". The main step decides the job's status; a later step
+  that failed makes it partial ("… · reindex failed"). Runs recorded before
+  jobs existed show as single-step jobs.
 - **Activity filters and pages**: status/action/provider and `page` (25
-  runs a page), as query params on `/activity` — the live-poll endpoint
-  carries the same ones, so a filtered page keeps patching in place. When
+  jobs a page), as query params on `/activity` — all of them on JOBS (the
+  action filter means "has a step of that action"). The live-poll endpoint
+  returns the same page with a fingerprint; the table re-renders only when
+  it moves, and otherwise patches durations and open logs in place. When
   the set of runs on the page changes, the table re-renders in place with
   expanded rows kept open. A "Reindex now" button sits in the header.
 - **Catalog is also the providers view**: each row joins the three stores —

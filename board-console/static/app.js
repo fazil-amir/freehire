@@ -93,16 +93,40 @@ document.addEventListener("click", function (e) {
   if (detail) detail.hidden = !detail.hidden;
 });
 
+// Click a .job-row (Activity) to show or hide its steps. Closing a job also
+// closes its steps' open logs.
+document.addEventListener("click", function (e) {
+  var row = e.target.closest(".job-row");
+  if (!row || e.target.closest("button, a, form, input, select")) return;
+  setJobOpen(row, !row.classList.contains("open"));
+});
+
+function setJobOpen(row, open) {
+  var key = row.dataset.job;
+  row.classList.toggle("open", open);
+  document.querySelectorAll('[data-step-of="' + key + '"]').forEach(function (el) { el.hidden = !open; });
+  if (!open) {
+    document.querySelectorAll('[data-detail-of="' + key + '"]').forEach(function (el) { el.hidden = true; });
+  }
+}
+
 // refreshLiveRegion, keeping every expanded .run-detail expanded.
+// refreshLiveRegion, keeping open what was open: expanded logs, and on
+// Activity the open jobs' step rows ([data-keep-open]).
 function refreshKeepingOpen() {
   var open = Array.prototype.map.call(
-    document.querySelectorAll(".run-detail:not([hidden])"),
+    document.querySelectorAll(".run-detail:not([hidden]), [data-keep-open]:not([hidden])"),
     function (el) { return el.id; }
   );
   return refreshLiveRegion().then(function () {
     open.forEach(function (id) {
       var el = document.getElementById(id);
       if (el) el.hidden = false;
+    });
+    // A job row reads open when any of its steps is showing.
+    document.querySelectorAll(".job-row").forEach(function (row) {
+      var shown = document.querySelector('[data-step-of="' + row.dataset.job + '"]:not([hidden])');
+      row.classList.toggle("open", !!shown);
     });
   });
 }
@@ -188,14 +212,56 @@ document.addEventListener("submit", function (e) {
   var form = e.target;
   if (!form.matches("form[data-async]")) return;
   e.preventDefault();
-  if (form.dataset.confirm && !window.confirm(form.dataset.confirm)) return;
+  var ask = form.dataset.confirm
+    ? confirmDialog(form.dataset.confirm, {
+        title: form.dataset.confirmTitle,
+        confirmLabel: form.dataset.confirmLabel,
+        danger: form.hasAttribute("data-confirm-danger")
+      })
+    : Promise.resolve(true);
+  ask.then(function (ok) {
+    if (ok) runAsyncForm(form);
+  });
+});
+
+function runAsyncForm(form) {
   postForm(form)
     .then(function () {
       toast(form.dataset.done || "Done");
       if (form.hasAttribute("data-refresh")) return refreshLiveRegion();
     })
     .catch(function (err) { toast(err.message, true); });
-});
+}
+
+// confirmDialog asks in Board Console's own dialog (templates/partials.html,
+// "confirm-modal") and resolves true only when the confirm button is
+// pressed. Cancel, ×, Esc and a backdrop click all resolve false. Focus
+// starts on Cancel, so a stray Enter never confirms a destructive action.
+// opts: {title, confirmLabel, danger}.
+function confirmDialog(message, opts) {
+  var dialog = document.getElementById("confirm-dialog");
+  if (!dialog) return Promise.resolve(false);
+  opts = opts || {};
+  var ok = dialog.querySelector("[data-confirm-ok]");
+  var cancel = dialog.querySelector("[data-confirm-cancel]");
+  dialog.querySelector("#confirm-title").textContent = opts.title || "Are you sure?";
+  dialog.querySelector("#confirm-message").textContent = message;
+  ok.textContent = opts.confirmLabel || "Confirm";
+  ok.className = "btn " + (opts.danger ? "btn-destructive" : "btn-primary");
+
+  return new Promise(function (resolve) {
+    var confirmed = false;
+    ok.onclick = function () { confirmed = true; dialog.close(); };
+    cancel.onclick = function () { dialog.close(); };
+    dialog.addEventListener("close", function onClose() {
+      dialog.removeEventListener("close", onClose);
+      ok.onclick = cancel.onclick = null;
+      resolve(confirmed);
+    });
+    dialog.showModal();
+    cancel.focus();
+  });
+}
 
 // Times are rendered by the server in UTC (its container's zone); every
 // <time data-local> is rewritten here in the VIEWER's timezone, in the one
@@ -524,12 +590,12 @@ function showScheduleError(dialog, message) {
   });
 })();
 
-// Activity page: click a run row to expand its captured output, and poll
-// while anything is still running — patching status/duration/log text in
-// place, so a live crawl's output grows visibly and an expanded row stays
-// expanded. When the set of runs on this page changes (a run started, the
-// "Reindex now" button), the table is re-rendered in place with the same
-// rows still expanded — never a full page reload.
+// Activity page: one row per job (see jobs.go), polled while anything runs.
+// When the server's fingerprint of the page differs from the one it was
+// rendered with — a job appeared, a step joined one, a status changed — the
+// table re-renders in place with open jobs and logs kept open; otherwise
+// only durations and the open logs' growing output are patched, so a live
+// crawl's log grows without the table jumping. Never a full page reload.
 (function () {
   if (!document.getElementById("activity-table")) return;
 
@@ -545,9 +611,9 @@ function showScheduleError(dialog, message) {
     });
   }
 
-  function formatOutput(run) {
-    var text = "stdout:\n" + run.stdout + "\n\nstderr:\n" + run.stderr;
-    if (run.err) text += "\n\nerror: " + run.err;
+  function formatOutput(step) {
+    var text = "stdout:\n" + step.stdout + "\n\nstderr:\n" + step.stderr;
+    if (step.err) text += "\n\nerror: " + step.err;
     return text;
   }
 
@@ -558,57 +624,31 @@ function showScheduleError(dialog, message) {
   }
 
   function poll() {
-    // Carry the same filters and page the page was rendered with, so the
-    // server returns the SAME set of runs shown here.
+    // Same filters and page as the rendered table, so the server returns
+    // the SAME jobs.
     fetch("/activity/status" + window.location.search)
       .then(function (r) { return r.json(); })
       .then(function (data) {
-        var runs = data.runs || [];
-        var knownIds = Array.prototype.map.call(
-          document.querySelectorAll(".run-row"),
-          function (el) { return el.dataset.runId; }
-        );
-        var newIds = runs.map(function (r) { return String(r.id); });
-        var sameSet = knownIds.length === newIds.length &&
-          knownIds.every(function (id) { return newIds.indexOf(id) !== -1; });
-
-        if (!sameSet) {
-          // The refresh announces itself, which schedules the next poll.
+        var table = document.getElementById("activity-table");
+        if (table && data.fingerprint !== table.dataset.fingerprint) {
           refreshKeepingOpen().finally(function () { schedulePoll(2000); });
           return;
         }
-
-        // A run that just finished can change more than its own row (the
-        // cleanup card's last run), so re-render rather than patch.
-        var finished = runs.some(function (r) {
-          var badge = document.querySelector('.run-row[data-run-id="' + r.id + '"] .status-badge');
-          return badge && (badge.textContent === "running" || badge.textContent === "queued") &&
-            r.status !== "running" && r.status !== "queued";
+        (data.jobs || []).forEach(function (job) {
+          var cell = document.querySelector('[data-job-duration="' + job.key + '"]');
+          if (cell) cell.textContent = job.duration;
+          (job.steps || []).forEach(function (step) {
+            var d = document.querySelector('[data-step-duration="' + step.dom + '"]');
+            if (d) d.textContent = step.duration;
+            var detail = document.getElementById("detail-" + step.dom);
+            if (detail && !detail.hidden) {
+              detail.querySelector(".run-output").textContent = formatOutput(step);
+            }
+          });
         });
-        if (finished) {
-          refreshKeepingOpen().finally(function () { schedulePoll(2000); });
-          return;
-        }
-
-        runs.forEach(function (r) {
-          var row = document.querySelector('.run-row[data-run-id="' + r.id + '"]');
-          if (!row) return;
-          var badge = row.querySelector(".status-badge");
-          badge.textContent = r.status;
-          badge.className = "badge badge-" + r.status + " status-badge";
-          var summary = row.querySelector(".outcome-summary");
-          if (summary) summary.textContent = r.summary;
-          row.querySelector(".duration-cell").textContent = r.duration;
-
-          var detail = document.getElementById("detail-" + r.id);
-          if (detail && !detail.hidden) {
-            detail.querySelector(".run-output").textContent = formatOutput(r);
-          }
-        });
-
-        // Idle, keep a slow watch: a run a schedule or another tab starts
-        // should appear without a reload.
-        schedulePoll(data.running ? 2000 : 15000);
+        // Idle, keep watching: a job a schedule, another tab or a click on
+        // this one starts should appear within seconds, without a reload.
+        schedulePoll(data.running ? 2000 : 5000);
       })
       .catch(function () { schedulePoll(3000); });
   }

@@ -13,7 +13,10 @@ const activityPageSize = 25
 
 type activityPageData struct {
 	Active string
-	Runs   []*Run
+	Jobs   []*Job // this page's jobs, each with its steps (see jobs.go)
+	// Fingerprint is jobsFingerprint of Jobs — the live poll re-renders the
+	// table only when the server's fingerprint moves away from it.
+	Fingerprint string
 
 	StatusFilter   string
 	ActionFilter   string
@@ -67,49 +70,40 @@ func handleCleanup(app *App, apply bool) http.HandlerFunc {
 }
 
 // activityFilters is read from the request's query params by both the page
-// handler and the polling endpoint, so a poll while filters are active
-// returns the SAME filtered set the page is showing — without that, the
-// page's "did the set of visible runs change?" check would see the
-// unfiltered server list as different from what's on screen and reload on
-// every single poll tick.
+// handler and the polling endpoint, so a poll returns the SAME page of jobs
+// the page is showing. Every filter applies to JOBS: status is the job's
+// status, action means "has a step of that action", provider is the job's.
 type activityFilters struct {
-	status        string
-	action        string
-	excludeAction string
-	provider      string
-	page          int
+	status      string
+	action      string
+	provider    string
+	cleanupView bool // ?view=cleanup: Cleanup jobs; otherwise everything else
+	page        int
 }
 
 func filtersFromRequest(r *http.Request) activityFilters {
 	q := r.URL.Query()
 	page, _ := strconv.Atoi(q.Get("page"))
-	// The two tabs split the runs: Cleanup is pinned to the dead-board
-	// cleanup, Pipeline is everything else (crawls, adds, reindexes).
-	action, exclude := q.Get("action"), "close-chronic-boards"
-	if q.Get("view") == "cleanup" {
-		action, exclude = "close-chronic-boards", ""
-	}
 	return activityFilters{
-		status:        q.Get("status"),
-		action:        action,
-		excludeAction: exclude,
-		provider:      strings.ToLower(strings.TrimSpace(q.Get("provider"))),
-		page:          page,
+		status:      q.Get("status"),
+		action:      q.Get("action"),
+		provider:    strings.ToLower(strings.TrimSpace(q.Get("provider"))),
+		cleanupView: q.Get("view") == "cleanup",
+		page:        page,
 	}
 }
 
-// paginate returns the requested page of runs (clamped into range) and
-// the page count. The page and the status poll both go through it, for
-// the same reason they share the filters.
-func paginate(runs []*Run, page int) ([]*Run, int, int) {
-	totalPages := (len(runs) + activityPageSize - 1) / activityPageSize
+// paginate returns the requested page of jobs (clamped into range) and the
+// page count.
+func paginate(jobs []*Job, page int) ([]*Job, int, int) {
+	totalPages := (len(jobs) + activityPageSize - 1) / activityPageSize
 	if totalPages < 1 {
 		totalPages = 1
 	}
 	page = min(max(page, 1), totalPages)
 	start := (page - 1) * activityPageSize
-	end := min(start+activityPageSize, len(runs))
-	return runs[start:end], page, totalPages
+	end := min(start+activityPageSize, len(jobs))
+	return jobs[start:end], page, totalPages
 }
 
 // pageURL is the current Activity URL with only the page number changed,
@@ -120,46 +114,50 @@ func pageURL(r *http.Request, page int) string {
 	return (&url.URL{Path: "/activity", RawQuery: q.Encode()}).String()
 }
 
-func filterRuns(all []*Run, f activityFilters) []*Run {
-	if f.status == "" && f.action == "" && f.excludeAction == "" && f.provider == "" {
-		return all
-	}
-	var out []*Run
-	for _, run := range all {
-		// The status filter is on the Outcome the page shows (success /
-		// partial / failed), not the raw exit status.
-		if f.status != "" && run.Outcome().Status != f.status {
+// filterJobs keeps the jobs the filters (and tab) select.
+func filterJobs(all []*Job, f activityFilters) []*Job {
+	var out []*Job
+	for _, j := range all {
+		if j.isCleanup() != f.cleanupView {
 			continue
 		}
-		if f.action != "" && run.Action != f.action {
+		if f.status != "" && j.Status != f.status {
 			continue
 		}
-		if f.excludeAction != "" && run.Action == f.excludeAction {
+		if f.action != "" && !j.hasAction(f.action) {
 			continue
 		}
-		if f.provider != "" && !strings.Contains(strings.ToLower(run.Provider), f.provider) {
+		if f.provider != "" && !strings.Contains(strings.ToLower(j.Provider), f.provider) {
 			continue
 		}
-		out = append(out, run)
+		out = append(out, j)
 	}
 	return out
+}
+
+// activityJobs is the page of jobs the request asks for, plus how many
+// matched in total.
+func activityJobs(app *App, f activityFilters) ([]*Job, int, int, int) {
+	matching := filterJobs(buildJobs(app.activity.List()), f)
+	jobs, page, totalPages := paginate(matching, f.page)
+	return jobs, page, totalPages, len(matching)
 }
 
 func handleActivity(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		f := filtersFromRequest(r)
-		matching := filterRuns(app.activity.List(), f)
-		runs, page, totalPages := paginate(matching, f.page)
+		jobs, page, totalPages, total := activityJobs(app, f)
 		data := activityPageData{
 			Active:         "activity",
-			Runs:           runs,
+			Jobs:           jobs,
+			Fingerprint:    jobsFingerprint(jobs),
 			StatusFilter:   f.status,
 			ActionFilter:   f.action,
 			ProviderFilter: r.URL.Query().Get("provider"),
-			CleanupView:    r.URL.Query().Get("view") == "cleanup",
+			CleanupView:    f.cleanupView,
 			Page:           page,
 			TotalPages:     totalPages,
-			Total:          len(matching),
+			Total:          total,
 			Cleanup:        buildCleanupCard(app),
 			ExplainEnabled: app.explainer.Enabled(),
 			Explanations:   app.explainer.Cached(),
@@ -174,43 +172,48 @@ func handleActivity(app *App) http.HandlerFunc {
 	}
 }
 
-// runStatusJSON is what /activity/status returns per run — enough for the
-// page's JS to patch an already-rendered row and its expanded detail (if
-// open) in place, without a full reload, while a run is still going.
-type runStatusJSON struct {
-	ID       int    `json:"id"`
-	Status   string `json:"status"`  // the Outcome's status, as the badge shows it
-	Summary  string `json:"summary"` // the Outcome's one-line result
+// stepStatusJSON is one step of a job in the live poll: enough to patch
+// its duration and, if its log is open, the growing output in place.
+type stepStatusJSON struct {
+	Dom      string `json:"dom"` // "<job key>-<run id>": a shared step renders once per job
 	Duration string `json:"duration"`
 	Stdout   string `json:"stdout"`
 	Stderr   string `json:"stderr"`
 	Err      string `json:"err"`
 }
 
-// handleActivityStatus is polled client-side while anything is running: it
-// carries the live (possibly still-growing) stdout/stderr for every VISIBLE
-// (i.e. filter-matching) run, so an expanded row's log updates in place
-// instead of only appearing once the run finishes.
+type jobStatusJSON struct {
+	Key      string           `json:"key"`
+	Duration string           `json:"duration"`
+	Steps    []stepStatusJSON `json:"steps"`
+}
+
+// handleActivityStatus is polled by the Activity page: the same page of
+// jobs, with a fingerprint — when it differs from what the page rendered
+// (a new job, a step joining one, a status change) the page re-renders;
+// otherwise it patches durations and open logs from the rest.
 func handleActivityStatus(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		f := filtersFromRequest(r)
-		runs, _, _ := paginate(filterRuns(app.activity.List(), f), f.page)
-		out := make([]runStatusJSON, len(runs))
-		for i, run := range runs {
-			out[i] = runStatusJSON{
-				ID:       run.ID,
-				Status:   run.Outcome().Status,
-				Summary:  run.Outcome().Summary,
-				Duration: run.Duration().String(),
-				Stdout:   run.Stdout,
-				Stderr:   run.Stderr,
-				Err:      run.Err,
+		jobs, _, _, _ := activityJobs(app, filtersFromRequest(r))
+		out := make([]jobStatusJSON, len(jobs))
+		for i, j := range jobs {
+			js := jobStatusJSON{Key: j.Key, Duration: j.Duration.String()}
+			for _, s := range j.Steps {
+				js.Steps = append(js.Steps, stepStatusJSON{
+					Dom:      j.Key + "-" + strconv.Itoa(s.ID),
+					Duration: s.Duration().String(),
+					Stdout:   s.Stdout,
+					Stderr:   s.Stderr,
+					Err:      s.Err,
+				})
 			}
+			out[i] = js
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"running": app.activity.AnyRunning(),
-			"runs":    out,
+			"running":     app.activity.AnyRunning(),
+			"fingerprint": jobsFingerprint(jobs),
+			"jobs":        out,
 		})
 	}
 }

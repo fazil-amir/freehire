@@ -75,6 +75,7 @@ func main() {
 	}
 
 	runner := NewRunner(csvStore, activity, dbStore, cleanupStore, binariesFromEnv())
+	runner.OnCrawlFinished = scheduleStore.RecordProviderCrawl
 	scheduler := NewScheduler(scheduleStore, runner)
 
 	stop := make(chan struct{})
@@ -101,6 +102,7 @@ func main() {
 	mux.HandleFunc("GET /catalog/results", requireAuth(app.sessions, handleCatalogResults(app)))
 	mux.HandleFunc("POST /crawl", requireAuth(app.sessions, handleCrawl(app)))
 	mux.HandleFunc("POST /reindex", requireAuth(app.sessions, handleReindexNow(app)))
+	mux.HandleFunc("POST /providers/remove", requireAuth(app.sessions, handleRemoveProvider(app)))
 	mux.HandleFunc("POST /companies/refresh", requireAuth(app.sessions, handleCompanyRefresh(app)))
 	mux.HandleFunc("POST /bulk", requireAuth(app.sessions, handleBulkCrawl(app)))
 	mux.HandleFunc("POST /new-provider", requireAuth(app.sessions, handleNewProvider(app)))
@@ -138,6 +140,7 @@ func envOr(key, fallback string) string {
 func binariesFromEnv() Binaries {
 	b := DefaultBinaries()
 	b.BulkAddBoards = envOr("BULK_ADD_BOARDS_BIN", b.BulkAddBoards)
+	b.AddBoard = envOr("ADD_BOARD_BIN", b.AddBoard)
 	b.Ingest = envOr("INGEST_BIN", b.Ingest)
 	b.Reindex = envOr("REINDEX_BIN", b.Reindex)
 	b.CloseChronicBoards = envOr("CLOSE_CHRONIC_BOARDS_BIN", b.CloseChronicBoards)

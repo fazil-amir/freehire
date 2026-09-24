@@ -16,7 +16,7 @@
       <p class="page-subtitle" title="Closed jobs drop out of search; nothing is deleted, and a board that comes back reopens its jobs on the next crawl. Company job counts and company search are refreshed after each run.">
         Runs daily. Closes jobs from boards dead for 60 days or empty for 30, then recounts companies.</p>
       {{else}}
-      <p class="page-subtitle">Crawls, board additions, reindexes and company recounts, newest first — click a run for its output.</p>
+      <p class="page-subtitle">One row per job — a crawl with its reindex, a recount, … — newest first. Click a job for its steps.</p>
       {{end}}
     </div>
     <div class="page-actions">
@@ -26,7 +26,9 @@
         <button type="submit" class="btn btn-secondary">Preview</button>
       </form>
       <form method="post" action="/cleanup/run" data-async data-refresh
-            data-confirm="Close the open jobs of every dead board now? They drop out of search; nothing is deleted, and a board that comes back reopens them."
+            data-confirm-title="Run the dead board cleanup now?"
+            data-confirm="Closes the open jobs of every dead board, then recounts companies. Closed jobs drop out of search; nothing is deleted, and a board that comes back reopens them."
+            data-confirm-label="Run now"
             data-done="Dead board cleanup started">
         <button type="submit" class="btn btn-primary">Run now</button>
       </form>
@@ -67,6 +69,7 @@
           <option value="reindex" {{if eq .ActionFilter "reindex"}}selected{{end}}>reindex</option>
           <option value="recount-companies" {{if eq .ActionFilter "recount-companies"}}selected{{end}}>recount-companies</option>
           <option value="reindex-companies" {{if eq .ActionFilter "reindex-companies"}}selected{{end}}>reindex-companies</option>
+          <option value="remove-boards" {{if eq .ActionFilter "remove-boards"}}selected{{end}}>remove-boards</option>
         </select>
         {{end}}
       </div>
@@ -91,33 +94,50 @@
       {{end}}
     </form>
     <div data-live-region>
-    <table class="catalog-table" id="activity-table">
+    {{/* One row per JOB (see jobs.go); click it for its steps, and a step
+         for its log. A step shared by two jobs renders under each, so every
+         id carries the job key. */}}
+    <table class="catalog-table" id="activity-table" data-fingerprint="{{.Fingerprint}}">
       <colgroup>
-        <col style="width: 18%"><col style="width: 30%"><col style="width: 10%"><col style="width: 20%"><col style="width: 22%">
+        <col style="width: 20%"><col style="width: 20%"><col style="width: 30%"><col style="width: 10%"><col style="width: 20%">
       </colgroup>
       <thead>
         <tr>
           <th>Provider</th>
+          <th>Job</th>
           <th>Status</th>
-          <th>Duration</th>
-          <th>Action type</th>
+          <th>Took</th>
           <th>Started</th>
         </tr>
       </thead>
       <tbody>
-        {{range .Runs}}
-        <tr class="run-row" data-run-id="{{.ID}}">
-          <td>{{if .Provider}}{{.Provider}}{{else}}<span class="muted">—</span>{{end}}</td>
-          {{$o := .Outcome}}
+        {{range $job := .Jobs}}
+        <tr class="job-row" data-job="{{$job.Key}}" {{if $job.Running}}data-running{{end}}>
+          <td><span class="job-chevron" aria-hidden="true">›</span>{{if $job.Provider}}{{$job.Provider}}{{else}}<span class="muted">—</span>{{end}}</td>
           <td>
-            <span class="badge badge-{{$o.Status}} status-badge">{{$o.Status}}</span>
-            <div class="cell-sub outcome-summary">{{$o.Summary}}</div>
+            {{$job.Kind}}
+            <div class="cell-sub step-pills">{{range $job.Actions}}<span class="pill pill-sm pill-{{.}}">{{.}}</span>{{end}}</div>
           </td>
-          <td class="duration-cell">{{.Duration}}</td>
-          <td><span class="pill pill-{{.Action}}">{{.Action}}</span>{{if .Label}} <span class="pill">{{.Label}}</span>{{end}}</td>
+          <td>
+            <span class="badge badge-{{$job.Status}}">{{$job.Status}}</span>
+            <div class="cell-sub">{{$job.Summary}}</div>
+          </td>
+          <td class="job-duration" data-job-duration="{{$job.Key}}">{{$job.Duration}}</td>
+          <td><time datetime="{{iso $job.StartedAt}}" data-local>{{$job.StartedAt.UTC.Format "02/01/2006 - 15:04:05"}} UTC</time></td>
+        </tr>
+        {{range $job.Steps}}
+        <tr class="run-row step-row" id="step-{{$job.Key}}-{{.ID}}" data-run-id="{{$job.Key}}-{{.ID}}"
+            data-step-of="{{$job.Key}}" data-keep-open hidden>
+          <td class="step-cell"><span class="step-branch" aria-hidden="true">└</span><span class="pill pill-{{.Action}}">{{.Action}}</span>{{if .Label}} <span class="pill">{{.Label}}</span>{{end}}</td>
+          <td class="cell-sub">{{with .SharedWith}}shared with {{.}}{{end}}</td>
+          <td>
+            <span class="badge badge-{{.Outcome.Status}}">{{.Outcome.Status}}</span>
+            <div class="cell-sub">{{.Outcome.Summary}}</div>
+          </td>
+          <td class="duration-cell" data-step-duration="{{$job.Key}}-{{.ID}}">{{.Duration}}</td>
           <td><time datetime="{{iso .StartedAt}}" data-local>{{.StartedAt.UTC.Format "02/01/2006 - 15:04:05"}} UTC</time></td>
         </tr>
-        <tr class="run-detail" id="detail-{{.ID}}" hidden>
+        <tr class="run-detail" id="detail-{{$job.Key}}-{{.ID}}" data-detail-of="{{$job.Key}}" data-keep-open hidden>
           <td colspan="5">
             <pre class="run-output">stdout:
 {{.Stdout}}
@@ -133,6 +153,7 @@ error: {{.Err}}{{end}}</pre>
             </div>
           </td>
         </tr>
+        {{end}}
         {{else}}
         <tr><td colspan="5" class="muted">{{if .CleanupView}}No cleanup runs yet — try Preview.{{else}}No runs yet.{{end}}</td></tr>
         {{end}}
@@ -141,7 +162,7 @@ error: {{.Err}}{{end}}</pre>
 
     <div class="table-footer">
       {{if .PrevURL}}<a class="page-link" href="{{.PrevURL}}">← Prev</a>{{end}}
-      <span class="muted">Page {{.Page}} / {{.TotalPages}} · {{.Total}} runs</span>
+      <span class="muted">Page {{.Page}} / {{.TotalPages}} · {{.Total}} jobs</span>
       {{if .NextURL}}<a class="page-link" href="{{.NextURL}}">Next →</a>{{end}}
     </div>
     </div>

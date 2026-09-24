@@ -43,6 +43,11 @@ type Runner struct {
 	crawlMu  sync.Mutex
 	crawling map[string]bool // providers with a crawl in flight — see claimCrawl
 
+	// OnCrawlFinished, when set, hears about every finished crawl of a
+	// provider — click, schedule or bulk run — with its outcome, so the
+	// schedules can count it (ScheduleStore.RecordProviderCrawl).
+	OnCrawlFinished func(provider string, finishedAt time.Time, outcome string)
+
 	// heavyMu serializes the catalogue-wide Meilisearch rebuilds board-console
 	// runs: the jobs reindex and reindex-companies. freehire's own guard
 	// between them is a Postgres advisory lock (worker.HoldHeavyIndexLock)
@@ -61,13 +66,16 @@ type Runner struct {
 
 	reindexMu      sync.Mutex // guards the two fields below, not subprocess execution itself
 	reindexRunning bool
-	reindexAgain   bool // a request arrived while one was already running — run once more after
+	// reindexPending are the jobs waiting for a reindex: the next reindex run
+	// serves ALL of them, and becomes a step of each (see jobs.go).
+	reindexPending []int
 }
 
 // Binaries holds the paths to the freehire worker binaries, overridable for
 // local (non-container) testing.
 type Binaries struct {
 	BulkAddBoards      string
+	AddBoard           string
 	Ingest             string
 	Reindex            string
 	CloseChronicBoards string
@@ -82,6 +90,7 @@ func DefaultBinaries() Binaries {
 		Ingest:             "/app/ingest",
 		Reindex:            "/app/reindex",
 		CloseChronicBoards: "/app/close-chronic-boards",
+		AddBoard:           "/app/add-board",
 		RecountCompanies:   "/app/recount-companies",
 		ReindexCompanies:   "/app/reindex-companies",
 		CSVPath:            "/app/data/combined_boards.csv",
@@ -120,13 +129,22 @@ func (r *Runner) FullyAdded(ctx context.Context, provider string) bool {
 }
 
 // runSubprocess runs one subprocess against an already-created (running)
-// Run, streaming its stdout/stderr as they're written (not buffering until
+// Run and finishes the Run with its result — see execInto.
+func (r *Runner) runSubprocess(run *Run, extraEnv []string, name string, args ...string) error {
+	err := r.execInto(run, extraEnv, name, args...)
+	r.activity.Finish(run, err)
+	return err
+}
+
+// execInto runs one subprocess against an already-created (running) Run,
+// streaming its stdout/stderr as they're written (not buffering until
 // exit) so the Activity page can show a live-updating log while the
-// command is still going.
+// command is still going. It does NOT finish the Run, so several commands
+// can write into one (see StartRemoveProvider).
 //
 // extraEnv (KEY=value) is added on top of board-console's own environment,
 // which every subprocess inherits — CATALOGUE_TECH_ONLY included.
-func (r *Runner) runSubprocess(run *Run, extraEnv []string, name string, args ...string) error {
+func (r *Runner) execInto(run *Run, extraEnv []string, name string, args ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), subprocessTimeout)
 	defer cancel()
 
@@ -137,17 +155,14 @@ func (r *Runner) runSubprocess(run *Run, extraEnv []string, name string, args ..
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
-		r.activity.Finish(run, err)
 		return err
 	}
 	stderrPipe, err := cmd.StderrPipe()
 	if err != nil {
-		r.activity.Finish(run, err)
 		return err
 	}
 
 	if err := cmd.Start(); err != nil {
-		r.activity.Finish(run, err)
 		return err
 	}
 
@@ -163,16 +178,14 @@ func (r *Runner) runSubprocess(run *Run, extraEnv []string, name string, args ..
 	}()
 	wg.Wait()
 
-	err = cmd.Wait()
-	r.activity.Finish(run, err)
-	return err
+	return cmd.Wait()
 }
 
 // exec runs one subprocess immediately, with its own Activity row starting
 // straight in "running" — used for add-boards and reindex, neither of
 // which is concurrency-limited the way ingest is.
-func (r *Runner) exec(action, provider, name string, args ...string) error {
-	run := r.activity.Start(action, provider)
+func (r *Runner) exec(action, provider string, jobs []int, name string, args ...string) error {
+	run := r.activity.Start(action, provider, jobs...)
 	return r.runSubprocess(run, nil, name, args...)
 }
 
@@ -181,8 +194,8 @@ func (r *Runner) exec(action, provider, name string, args ...string) error {
 // concurrency slot is actually free, so a click that arrives while
 // maxConcurrentIngest ingests are already busy still shows up immediately
 // instead of looking silently dropped.
-func (r *Runner) execIngestQueued(provider, label string, extraEnv []string, name string, args ...string) error {
-	run := r.activity.StartQueued("ingest", provider, label)
+func (r *Runner) execIngestQueued(provider, label string, job int, extraEnv []string, name string, args ...string) error {
+	run := r.activity.StartQueued("ingest", provider, label, job)
 	r.ingestSem <- struct{}{}
 	defer func() { <-r.ingestSem }()
 	r.activity.MarkRunning(run)
@@ -210,8 +223,8 @@ func streamInto(activity *ActivityLog, run *Run, reader io.Reader, stderr bool) 
 // (see db.go); the CSV keeps only the candidate list (provider/board/
 // company) plus a frozen `added` value used solely as a stale fallback
 // display when the database can't be reached.
-func (r *Runner) runAdd(provider string) error {
-	if err := r.exec("add-boards", provider, r.bin.BulkAddBoards,
+func (r *Runner) runAdd(provider string, job int) error {
+	if err := r.exec("add-boards", provider, []int{job}, r.bin.BulkAddBoards,
 		"-in", r.bin.CSVPath, "--apply", "-provider="+provider); err != nil {
 		return fmt.Errorf("add-boards %s: %w", provider, err)
 	}
@@ -223,40 +236,44 @@ func (r *Runner) runAdd(provider string) error {
 // INGEST_REFETCH_ALL: every listed posting is treated as new and re-written,
 // not just liveness-refreshed — the repair path after an adapter fix, at one
 // detail request per stored posting.
-func (r *Runner) runIngest(provider string, refetchAll bool) error {
+func (r *Runner) runIngest(provider string, refetchAll bool, job int) error {
 	label, env := "", []string(nil)
 	if refetchAll {
 		label, env = "full re-crawl", []string{"INGEST_REFETCH_ALL=1"}
 	}
-	if err := r.execIngestQueued(provider, label, env, r.bin.Ingest, provider); err != nil {
+	if err := r.execIngestQueued(provider, label, job, env, r.bin.Ingest, provider); err != nil {
 		return fmt.Errorf("ingest %s: %w", provider, err)
 	}
 	return nil
 }
 
-// runReindexNow actually runs the reindex subprocess — call queueReindex
-// instead, which is what coalesces concurrent requests into this.
-func (r *Runner) runReindexNow() error {
+// runReindexNow actually runs the reindex subprocess, as a step of every job
+// in jobs — call queueReindex instead, which is what coalesces concurrent
+// requests into this.
+func (r *Runner) runReindexNow(jobs []int) error {
 	r.heavyMu.Lock()
 	defer r.heavyMu.Unlock()
-	if err := r.exec("reindex", "", r.bin.Reindex); err != nil {
+	if err := r.exec("reindex", "", jobs, r.bin.Reindex); err != nil {
 		return fmt.Errorf("reindex: %w", err)
 	}
 	return nil
 }
 
-// queueReindex triggers a reindex, coalesced with any already in flight:
-// if one is already running, this request is satisfied by marking that one
-// to run ONE more time right after it finishes — never two running at
-// once, and never more than one queued regardless of how many requests
-// arrive while it's busy (a full-catalog rebuild the second call would
-// have started is redundant with the one the first call is about to run
-// again anyway). Always returns immediately — the actual reindex(es) run
-// in their own goroutine.
-func (r *Runner) queueReindex() {
+// queueReindex triggers a reindex for jobs, coalesced with any already in
+// flight: never two running at once, and every request that arrives while
+// one runs is served by ONE more run right after it — a full-catalog
+// rebuild the second call would have started is redundant with the one
+// that follows anyway. That next run is a step of every job waiting on it,
+// which is how one reindex shows under two crawls ("shared with …").
+// Always returns immediately — the actual reindex(es) run in their own
+// goroutine.
+func (r *Runner) queueReindex(jobs ...int) {
+	if len(jobs) == 0 { // a reindex nobody else asked for is its own job
+		jobs = []int{r.activity.NewJob()}
+	}
 	r.reindexMu.Lock()
+	r.reindexPending = append(r.reindexPending, jobs...)
 	if r.reindexRunning {
-		r.reindexAgain = true
 		r.reindexMu.Unlock()
 		return
 	}
@@ -268,17 +285,17 @@ func (r *Runner) queueReindex() {
 
 func (r *Runner) drainReindex() {
 	for {
-		_ = r.runReindexNow()
-
 		r.reindexMu.Lock()
-		if r.reindexAgain {
-			r.reindexAgain = false
+		if len(r.reindexPending) == 0 {
+			r.reindexRunning = false
 			r.reindexMu.Unlock()
-			continue
+			return
 		}
-		r.reindexRunning = false
+		jobs := r.reindexPending
+		r.reindexPending = nil
 		r.reindexMu.Unlock()
-		return
+
+		_ = r.runReindexNow(jobs)
 	}
 }
 
@@ -312,13 +329,13 @@ func (r *Runner) releaseCrawl(provider string) {
 
 // crawlOne adds provider's boards when not every one is added yet, then
 // ingests it. The caller holds the provider's claim.
-func (r *Runner) crawlOne(provider string, refetchAll bool) error {
+func (r *Runner) crawlOne(provider string, refetchAll bool, job int) error {
 	if !r.FullyAdded(context.Background(), provider) {
-		if err := r.runAdd(provider); err != nil {
+		if err := r.runAdd(provider, job); err != nil {
 			return err
 		}
 	}
-	return r.runIngest(provider, refetchAll)
+	return r.runIngest(provider, refetchAll, job)
 }
 
 // StartCrawl is the one entry point for crawling a single provider — the
@@ -331,11 +348,13 @@ func (r *Runner) StartCrawl(provider string, reindexAfter, refetchAll bool, done
 	if !r.claimCrawl(provider) {
 		return false
 	}
+	job := r.activity.NewJob()
 	go func() {
-		err := r.crawlOne(provider, refetchAll)
+		err := r.crawlOne(provider, refetchAll, job)
+		r.crawlFinished(provider, err)
 		r.releaseCrawl(provider)
 		if reindexAfter {
-			r.queueReindex()
+			r.queueReindex(job)
 		}
 		if done != nil {
 			done(err)
@@ -360,24 +379,80 @@ func (r *Runner) crawlOutcome(provider string, err error) string {
 	return OutcomeSuccess
 }
 
+// StartRemoveProvider is "Remove provider": it retires every live board of
+// provider through freehire's own add-board --retire (status 'retired',
+// row kept, health cleared — nothing deleted, jobs untouched), one call
+// per board, all streamed into ONE Activity run.
+//
+// It holds the provider's crawl lock throughout, so no crawl or schedule
+// can re-add a board mid-removal, and reports false, starting nothing,
+// when the provider is already being crawled. deleteSchedules runs once
+// the lock is held and returns how many of the provider's schedules it
+// removed — without that, the next scheduled crawl would re-add every
+// board (a crawl adds what is missing), silently undoing the removal.
+func (r *Runner) StartRemoveProvider(provider string, boards []liveBoard, deleteSchedules func() int) bool {
+	if !r.claimCrawl(provider) {
+		return false
+	}
+	schedules := deleteSchedules()
+	run := r.activity.Start("remove-boards", provider, r.activity.NewJob())
+	go func() {
+		defer r.releaseCrawl(provider)
+		retired, failed := 0, 0
+		for _, b := range boards {
+			args := []string{"--retire", "--provider=" + provider, "--board=" + b.Board, "--apply"}
+			if b.Region != "" {
+				args = append(args, "--region="+b.Region)
+			}
+			if err := r.execInto(run, nil, r.bin.AddBoard, args...); err != nil {
+				failed++ // e.g. already retired by someone else — keep going
+				continue
+			}
+			retired++
+		}
+		// The summary line Outcome reads (see removeDoneRe).
+		r.activity.AppendOutput(run, []byte(fmt.Sprintf(
+			"remove-boards: done. retired=%d failed=%d schedules_deleted=%d\n", retired, failed, schedules)), true)
+		var err error
+		if failed > 0 {
+			err = fmt.Errorf("%d of %d boards could not be retired", failed, len(boards))
+		}
+		r.activity.Finish(run, err)
+	}()
+	return true
+}
+
+// crawlFinished reports a finished crawl to OnCrawlFinished. Called while
+// the provider's claim is still held, so a schedule cannot see the provider
+// free before its clock has been reset.
+func (r *Runner) crawlFinished(provider string, err error) {
+	if r.OnCrawlFinished != nil {
+		r.OnCrawlFinished(provider, time.Now().Round(0), r.crawlOutcome(provider, err))
+	}
+}
+
 // RunBatch is "Add + Crawl Selected": each provider in order, then ONE
 // reindex at the end when reindexAfter is set. A provider already being
 // crawled elsewhere is skipped rather than crawled a second time alongside.
 func (r *Runner) RunBatch(providers []string, reindexAfter bool) error {
 	var firstErr error
+	var jobs []int
 	for _, p := range providers {
 		if !r.claimCrawl(p) {
 			log.Printf("batch: %s is already being crawled — skipped", p)
 			continue
 		}
-		err := r.crawlOne(p, false)
+		job := r.activity.NewJob()
+		jobs = append(jobs, job)
+		err := r.crawlOne(p, false, job)
+		r.crawlFinished(p, err)
 		r.releaseCrawl(p)
 		if err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
-	if reindexAfter {
-		r.queueReindex()
+	if reindexAfter && len(jobs) > 0 {
+		r.queueReindex(jobs...)
 	}
 	return firstErr
 }
@@ -399,12 +474,13 @@ func (r *Runner) StartCleanup(apply bool) bool {
 	go func() {
 		defer r.cleanupMu.Unlock()
 		startedAt := time.Now()
+		job := r.activity.NewJob()
 		var err error
 		if apply {
-			run := r.activity.Start("close-chronic-boards", "")
+			run := r.activity.Start("close-chronic-boards", "", job)
 			err = r.runSubprocess(run, nil, r.bin.CloseChronicBoards, "--apply", "--apply-empty-feed")
 		} else {
-			run := r.activity.StartLabeled("close-chronic-boards", "", "dry run")
+			run := r.activity.StartLabeled("close-chronic-boards", "", "dry run", job)
 			err = r.runSubprocess(run, nil, r.bin.CloseChronicBoards)
 		}
 		if !apply {
@@ -417,12 +493,12 @@ func (r *Runner) StartCleanup(apply bool) bool {
 		if recErr := r.cleanup.Record(startedAt, status); recErr != nil {
 			log.Printf("cleanup: record run: %v", recErr)
 		}
-		r.queueReindex()
+		r.queueReindex(job)
 		// Closed jobs change company job counts: refresh them too. Skipped
 		// (not queued) when a manual refresh is already running — that one
 		// reads the same, already-closed rows.
 		if r.companyMu.TryLock() {
-			_ = r.companyRefresh()
+			_ = r.companyRefresh(job)
 			r.companyMu.Unlock()
 		}
 	}()
@@ -438,7 +514,7 @@ func (r *Runner) StartCompanyRefresh() bool {
 	}
 	go func() {
 		defer r.companyMu.Unlock()
-		_ = r.companyRefresh()
+		_ = r.companyRefresh(r.activity.NewJob())
 	}()
 	return true
 }
@@ -449,13 +525,13 @@ func (r *Runner) StartCompanyRefresh() bool {
 // visible, since company search only lists companies with open jobs. The
 // rebuild waits on heavyMu for any jobs reindex in flight rather than
 // letting freehire's advisory lock skip it. The caller holds companyMu.
-func (r *Runner) companyRefresh() error {
-	if err := r.exec("recount-companies", "", r.bin.RecountCompanies); err != nil {
+func (r *Runner) companyRefresh(job int) error {
+	if err := r.exec("recount-companies", "", []int{job}, r.bin.RecountCompanies); err != nil {
 		return fmt.Errorf("recount-companies: %w", err)
 	}
 	r.heavyMu.Lock()
 	defer r.heavyMu.Unlock()
-	if err := r.exec("reindex-companies", "", r.bin.ReindexCompanies); err != nil {
+	if err := r.exec("reindex-companies", "", []int{job}, r.bin.ReindexCompanies); err != nil {
 		return fmt.Errorf("reindex-companies: %w", err)
 	}
 	return nil

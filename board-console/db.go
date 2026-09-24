@@ -31,33 +31,68 @@ func NewDBStore(databaseURL string) (*DBStore, error) {
 	return &DBStore{db: db}, nil
 }
 
-// AddedCounts returns, per provider, how many of its board rows are
-// currently 'active' or 'pending' in freehire's own boards table — the
-// live, cross-environment-correct answer the CSV's own `added` column
-// can no longer give (see resolveAddedCounts for the fallback when this
-// fails).
-func (s *DBStore) AddedCounts(ctx context.Context) (map[string]int, error) {
+// liveBoard is one 'active' or 'pending' row of freehire's boards table —
+// the identity add-board needs to retire it.
+type liveBoard struct {
+	Provider, Board, Region string
+}
+
+// liveBoards is board-console's ONE read query: every live board. Both
+// AddedCounts and LiveBoards are derived from it, so the read stays a
+// single statement however many views consume it.
+func (s *DBStore) liveBoards(ctx context.Context) ([]liveBoard, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT provider, board, status, count(*)
+		SELECT provider, board, region
 		FROM boards
 		WHERE status IN ('active', 'pending')
-		GROUP BY provider, board, status
 	`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	counts := map[string]int{}
+	var out []liveBoard
 	for rows.Next() {
-		var provider, board, status string
-		var n int
-		if err := rows.Scan(&provider, &board, &status, &n); err != nil {
+		var b liveBoard
+		if err := rows.Scan(&b.Provider, &b.Board, &b.Region); err != nil {
 			return nil, err
 		}
-		counts[provider] += n
+		out = append(out, b)
 	}
-	return counts, rows.Err()
+	return out, rows.Err()
+}
+
+// AddedCounts returns, per provider, how many of its board rows are
+// currently 'active' or 'pending' in freehire's own boards table — the
+// live, cross-environment-correct answer the CSV's own `added` column
+// can no longer give (see resolveAddedCounts for the fallback when this
+// fails).
+func (s *DBStore) AddedCounts(ctx context.Context) (map[string]int, error) {
+	boards, err := s.liveBoards(ctx)
+	if err != nil {
+		return nil, err
+	}
+	counts := map[string]int{}
+	for _, b := range boards {
+		counts[b.Provider]++
+	}
+	return counts, nil
+}
+
+// LiveBoards returns provider's live boards — what "Remove provider"
+// retires, one add-board call each.
+func (s *DBStore) LiveBoards(ctx context.Context, provider string) ([]liveBoard, error) {
+	boards, err := s.liveBoards(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []liveBoard
+	for _, b := range boards {
+		if b.Provider == provider {
+			out = append(out, b)
+		}
+	}
+	return out, nil
 }
 
 // resolveAddedCounts is the one place every page reads "how added is each

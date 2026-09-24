@@ -42,6 +42,26 @@
     </div>
   </div>
 </aside>
+{{template "confirm-modal"}}
+{{end}}
+
+{{/* The one confirmation dialog, on every signed-in page (the nav renders
+     it). app.js's confirmDialog() fills and opens it — every data-confirm
+     action goes through it; nothing uses the browser's confirm(). */}}
+{{define "confirm-modal"}}
+<dialog id="confirm-dialog" class="dialog-sm" aria-labelledby="confirm-title">
+  <div class="dialog-header">
+    <div><h2 id="confirm-title">Are you sure?</h2></div>
+    {{template "dialog-close"}}
+  </div>
+  <div class="dialog-body">
+    <p id="confirm-message" class="confirm-message"></p>
+  </div>
+  <div class="dialog-actions">
+    <button type="button" class="btn btn-secondary" data-confirm-cancel>Cancel</button>
+    <button type="button" class="btn btn-primary" data-confirm-ok>Confirm</button>
+  </div>
+</dialog>
 {{end}}
 
 {{/* A model's explanation of one run, split into its labelled sections
