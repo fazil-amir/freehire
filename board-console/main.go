@@ -104,6 +104,10 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
+	// The JSON API a separate UI drives (api.go): its own key and CORS, no
+	// session login.
+	registerAPI(mux, app)
+
 	mux.HandleFunc("GET /login", handleLoginPage(app.tmpl))
 	mux.HandleFunc("POST /login", handleLoginSubmit(app.sessions))
 	mux.HandleFunc("POST /logout", handleLogout(app.sessions))

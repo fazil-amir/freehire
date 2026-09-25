@@ -402,33 +402,44 @@ func handleRemoveProvider(app *App) http.HandlerFunc {
 			http.Error(w, "provider required", http.StatusBadRequest)
 			return
 		}
-		if app.db == nil {
-			actionError(w, http.StatusServiceUnavailable, "The database is not configured, so the boards to retire are unknown.")
-			return
-		}
-		boards, err := app.db.LiveBoards(r.Context(), provider)
-		if err != nil {
-			actionError(w, http.StatusServiceUnavailable, "Could not read "+provider+"'s boards from the database: "+err.Error())
-			return
-		}
-		deleteSchedules := func() int {
-			n, err := app.schedules.DeleteByProvider(provider)
-			if err != nil {
-				log.Printf("remove %s: delete schedules: %v", provider, err)
-			}
-			return n
-		}
-		purge := func() {
-			ids := app.activity.PurgeProvider(provider)
-			app.explainer.Forget(ids)
-			log.Printf("remove %s: purged %d activity run(s)", provider, len(ids))
-		}
-		if !app.runner.StartRemoveProvider(provider, boards, deleteSchedules, purge) {
-			actionError(w, http.StatusConflict, provider+" is being crawled right now — remove it once that finishes.")
+		if status, msg := startRemoveProvider(app, r, provider); status != 0 {
+			actionError(w, status, msg)
 			return
 		}
 		actionDone(w, r, "/")
 	}
+}
+
+// startRemoveProvider retires provider's live boards, drops its schedule
+// and, once every board is retired, purges its activity (see
+// Runner.StartRemoveProvider). The board list comes from the database, so
+// it is refused when that is unreachable rather than retiring only what the
+// CSV knows. A refusal returns its HTTP status and message; 0 means it
+// started. Shared by the page and the API.
+func startRemoveProvider(app *App, r *http.Request, provider string) (int, string) {
+	if app.db == nil {
+		return http.StatusServiceUnavailable, "The database is not configured, so the boards to retire are unknown."
+	}
+	boards, err := app.db.LiveBoards(r.Context(), provider)
+	if err != nil {
+		return http.StatusServiceUnavailable, "Could not read " + provider + "'s boards from the database: " + err.Error()
+	}
+	deleteSchedules := func() int {
+		n, err := app.schedules.DeleteByProvider(provider)
+		if err != nil {
+			log.Printf("remove %s: delete schedules: %v", provider, err)
+		}
+		return n
+	}
+	purge := func() {
+		ids := app.activity.PurgeProvider(provider)
+		app.explainer.Forget(ids)
+		log.Printf("remove %s: purged %d activity run(s)", provider, len(ids))
+	}
+	if !app.runner.StartRemoveProvider(provider, boards, deleteSchedules, purge) {
+		return http.StatusConflict, provider + " is being crawled right now — remove it once that finishes."
+	}
+	return 0, ""
 }
 
 // handleCompanyRefresh is the "Recount companies" button: company job
@@ -477,56 +488,12 @@ func handleNewProvider(app *App) http.HandlerFunc {
 			http.Error(w, "bad form", http.StatusBadRequest)
 			return
 		}
-		form := newProviderForm{
+		form, errMsg := addProviderRow(app, newProviderForm{
 			Provider: r.FormValue("provider"),
 			Board:    r.FormValue("board"),
 			Company:  r.FormValue("company"),
 			CrawlNow: r.FormValue("crawl_now") == "on",
-		}
-
-		knownProviders := app.csv.DistinctProviders()
-		known := false
-		for _, p := range knownProviders {
-			if p == form.Provider {
-				known = true
-				break
-			}
-		}
-		if known {
-			form.Kind = kindOf(form.Provider)
-		}
-
-		// Kind-driven field rules, applied server-side as a fallback in case
-		// the client (whose JS hides/auto-fills these fields — see
-		// catalog.html and app.js) didn't run: an Aggregator is a single
-		// feed, not a per-company entry, so it never carries a board and
-		// its company name is derived rather than typed; a Career site is
-		// always boardless.
-		switch form.Kind {
-		case KindAggregator:
-			form.Board = ""
-			if form.Company == "" {
-				form.Company = displayName(form.Provider)
-			}
-			form.CrawlNow = true // no separate "add without crawling" step for a single feed
-		case KindCareerSite:
-			form.Board = ""
-		}
-
-		var errMsg string
-		switch {
-		case form.Provider == "":
-			errMsg = "Select a provider."
-		case !known:
-			errMsg = "Provider must be one already known to freehire."
-		case form.Kind == KindATS && form.Board == "":
-			errMsg = "Board is required for ATS platforms."
-		case form.Company == "":
-			errMsg = "Company is required."
-		case app.csv.HasBoard(form.Provider, form.Board):
-			errMsg = form.Provider + " is already in the catalog" + boardSuffix(form.Board) + " — use Crawl on its row instead."
-		}
-
+		})
 		if errMsg != "" {
 			data := buildCatalogPageData(app, r)
 			data.NewProviderForm = form
@@ -535,19 +502,70 @@ func handleNewProvider(app *App) http.HandlerFunc {
 			app.tmpl.Render(w, "catalog", data)
 			return
 		}
-
-		if err := app.csv.AppendRow(form.Provider, form.Board, form.Company, false); err != nil {
-			http.Error(w, "failed to save row: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		if form.CrawlNow {
-			// Already crawling (a click on its row a moment ago): that crawl
-			// covers the row just added, so there is nothing to start.
-			app.runner.StartCrawl(form.Provider, true, false, nil)
-		}
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 	}
+}
+
+// addProviderRow is "+ New provider": it validates the form (applying the
+// kind's field rules), appends the row to the CSV (no DB call) and, when
+// asked, starts add + crawl for it. It returns the form as applied and, on
+// a validation or save failure, the message to show. Shared by the page's
+// form and the API.
+func addProviderRow(app *App, form newProviderForm) (newProviderForm, string) {
+	knownProviders := app.csv.DistinctProviders()
+	known := false
+	for _, p := range knownProviders {
+		if p == form.Provider {
+			known = true
+			break
+		}
+	}
+	if known {
+		form.Kind = kindOf(form.Provider)
+	}
+
+	// Kind-driven field rules, applied server-side as a fallback in case
+	// the client (whose JS hides/auto-fills these fields — see
+	// catalog.html and app.js) didn't run: an Aggregator is a single
+	// feed, not a per-company entry, so it never carries a board and
+	// its company name is derived rather than typed; a Career site is
+	// always boardless.
+	switch form.Kind {
+	case KindAggregator:
+		form.Board = ""
+		if form.Company == "" {
+			form.Company = displayName(form.Provider)
+		}
+		form.CrawlNow = true // no separate "add without crawling" step for a single feed
+	case KindCareerSite:
+		form.Board = ""
+	}
+
+	var errMsg string
+	switch {
+	case form.Provider == "":
+		errMsg = "Select a provider."
+	case !known:
+		errMsg = "Provider must be one already known to freehire."
+	case form.Kind == KindATS && form.Board == "":
+		errMsg = "Board is required for ATS platforms."
+	case form.Company == "":
+		errMsg = "Company is required."
+	case app.csv.HasBoard(form.Provider, form.Board):
+		errMsg = form.Provider + " is already in the catalog" + boardSuffix(form.Board) + " — use Crawl on its row instead."
+	}
+	if errMsg != "" {
+		return form, errMsg
+	}
+	if err := app.csv.AppendRow(form.Provider, form.Board, form.Company, false); err != nil {
+		return form, "Could not save the row: " + err.Error()
+	}
+	if form.CrawlNow {
+		// Already crawling (a click on its row a moment ago): that crawl
+		// covers the row just added, so there is nothing to start.
+		app.runner.StartCrawl(form.Provider, true, false, nil)
+	}
+	return form, ""
 }
 
 // providerKindsJSON builds the provider -> kind map the "+ New provider"

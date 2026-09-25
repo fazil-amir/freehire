@@ -521,30 +521,10 @@ func handleScheduleSave(app *App) http.HandlerFunc {
 		form := addScheduleForm{ID: r.FormValue("id"), Provider: r.FormValue("provider"), Times: times}
 
 		var errMsg string
-		switch {
-		case form.Provider == "":
-			errMsg = "Select a provider."
-		case timesErr != nil:
+		if timesErr != nil {
 			errMsg = timesErr.Error()
-		case len(form.Times) == 0:
-			errMsg = "Add at least one run time."
-		}
-		if errMsg == "" {
-			id := form.ID
-			if id == "" {
-				if sch, ok := app.schedules.ByProvider(form.Provider); ok {
-					id = sch.ID
-				}
-			}
-			var err error
-			if id == "" {
-				err = app.schedules.Add(form.Provider, form.Times)
-			} else {
-				err = app.schedules.Update(id, form.Provider, form.Times)
-			}
-			if err != nil {
-				errMsg = err.Error()
-			}
+		} else if err := saveSchedule(app, form.ID, form.Provider, form.Times); err != nil {
+			errMsg = err.Error()
 		}
 
 		if errMsg != "" {
@@ -562,6 +542,29 @@ func handleScheduleSave(app *App) http.HandlerFunc {
 		}
 		actionDone(w, r, "/schedules")
 	}
+}
+
+// saveSchedule creates a provider's schedule or updates the existing one —
+// a provider has one schedule, so saving "Add" for a provider that already
+// has one replaces that schedule's times. times are minutes after 00:00 UTC.
+// Its error is the message to show the operator. Shared by the page's form
+// and the API.
+func saveSchedule(app *App, id, provider string, times []int) error {
+	switch {
+	case provider == "":
+		return fmt.Errorf("Select a provider.")
+	case len(times) == 0:
+		return fmt.Errorf("Add at least one run time.")
+	}
+	if id == "" {
+		if sch, ok := app.schedules.ByProvider(provider); ok {
+			id = sch.ID
+		}
+	}
+	if id == "" {
+		return app.schedules.Add(provider, times)
+	}
+	return app.schedules.Update(id, provider, times)
 }
 
 // formTimes reads the modal's time rows — parallel "hour" and "minute"

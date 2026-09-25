@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -217,35 +218,43 @@ func handleActivityStatus(app *App) http.HandlerFunc {
 // explanation request — enough to spot "this board has failed every time".
 const explainHistory = 5
 
+// explainRun asks the model about one run (see explain.go), with the
+// earlier runs of the same action for the same provider as history. A
+// refusal returns its HTTP status and message. Shared by the page and the
+// API.
+func explainRun(app *App, ctx context.Context, id int) (string, int, string) {
+	if !app.explainer.Enabled() {
+		return "", http.StatusServiceUnavailable, "Set OPENAI_API_KEY in .env to enable explanations."
+	}
+	run, ok := app.activity.Get(id)
+	if !ok {
+		return "", http.StatusNotFound, "That run is no longer in the activity log."
+	}
+	// Earlier runs of the same action for the same provider, newest first.
+	var history []*Run
+	for _, h := range app.activity.List() {
+		if h.ID < run.ID && h.Action == run.Action && h.Provider == run.Provider {
+			history = append(history, h)
+			if len(history) == explainHistory {
+				break
+			}
+		}
+	}
+	answer, err := app.explainer.Explain(ctx, run, history)
+	if err != nil {
+		return "", http.StatusBadGateway, err.Error()
+	}
+	return answer, 0, ""
+}
+
 // handleExplain is the "Explain this run" button: it asks the model (see
 // explain.go) and returns {"explanation": "..."}.
 func handleExplain(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !app.explainer.Enabled() {
-			actionError(w, http.StatusServiceUnavailable, "Set OPENAI_API_KEY in .env to enable explanations.")
-			return
-		}
 		id, _ := strconv.Atoi(r.FormValue("id"))
-		run, ok := app.activity.Get(id)
-		if !ok {
-			actionError(w, http.StatusNotFound, "That run is no longer in the activity log.")
-			return
-		}
-
-		// Earlier runs of the same action for the same provider, newest first.
-		var history []*Run
-		for _, h := range app.activity.List() {
-			if h.ID < run.ID && h.Action == run.Action && h.Provider == run.Provider {
-				history = append(history, h)
-				if len(history) == explainHistory {
-					break
-				}
-			}
-		}
-
-		answer, err := app.explainer.Explain(r.Context(), run, history)
-		if err != nil {
-			actionError(w, http.StatusBadGateway, err.Error())
+		answer, status, msg := explainRun(app, r.Context(), id)
+		if status != 0 {
+			actionError(w, status, msg)
 			return
 		}
 		html, err := app.tmpl.Fragment("explain-answer", answer)
