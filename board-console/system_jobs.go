@@ -21,7 +21,7 @@ const (
 	sysRecount = "recount"
 )
 
-// systemJobInfo is what the page says about a system job; not stored.
+// systemJobInfo is what a UI says about a system job; not stored.
 type systemJobInfo struct {
 	Key, Name, Description string
 	DefaultMin             int    // its time until the operator changes it, minutes after 00:00 UTC

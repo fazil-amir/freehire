@@ -64,10 +64,10 @@ func handleSystemStats(app *App) http.HandlerFunc {
 	}
 }
 
-// handleBuildCachePrune is the Server card's "Clear build cache": docker
+// handleBuildCachePrune is "Clear build cache": docker
 // builder prune -af through the proxy, recorded as an Activity job like
-// every other operation. It answers with the bytes freed, for the toast.
-// The prune runs on its own context: leaving the page mid-prune must not
+// every other operation. It answers with the bytes freed. The prune runs
+// on its own context: a caller that goes away mid-prune must not
 // abort it half-way.
 func handleBuildCachePrune(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

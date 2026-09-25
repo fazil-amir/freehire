@@ -225,18 +225,3 @@ func (j *Job) mainStep() *JobStep {
 	}
 	return j.Steps[0]
 }
-
-// jobsFingerprint changes whenever the page would render differently: a
-// job appears, a step joins it, or a status changes. The Activity page
-// polls it and re-renders only when it moves.
-func jobsFingerprint(jobs []*Job) string {
-	var b strings.Builder
-	for _, j := range jobs {
-		b.WriteString(j.Key + ":" + j.Status)
-		for _, s := range j.Steps {
-			b.WriteString("," + strconv.Itoa(s.ID) + "=" + s.Outcome.Status)
-		}
-		b.WriteString(";")
-	}
-	return b.String()
-}

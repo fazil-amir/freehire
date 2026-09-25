@@ -99,7 +99,7 @@ func (s *DBStore) LiveBoards(ctx context.Context, provider string) ([]liveBoard,
 // provider" from: Postgres when reachable (the live, correct answer), or
 // the CSV's own `added` column — frozen since runAdd() stopped writing to
 // it — as a stale-but-non-crashing fallback when it isn't. The second
-// return value is a banner message for the page to show when the fallback
+// return value is a warning for a UI to show when the fallback
 // was used, or "" when the DB answered.
 func resolveAddedCounts(ctx context.Context, app *App) (map[string]int, string) {
 	if app.db != nil {

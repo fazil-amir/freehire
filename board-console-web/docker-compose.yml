@@ -1,0 +1,21 @@
+# Board Console's UI, built and served: `docker compose up -d --build`.
+# Settings come from .env beside this file (copy .env.example).
+services:
+  board-console-web:
+    build: .
+    environment:
+      API_BASE_URL: ${API_BASE_URL:-}
+      API_KEY: ${API_KEY:-}
+    # The dev server's port by default, so Board Console's allowed origin
+    # (BOARD_CONSOLE_CORS_ORIGINS) is the same whichever way the app runs.
+    ports:
+      - "${WEB_PORT:-5173}:80"
+    # Keeps it running: back after a crash or a host reboot, until stopped by hand.
+    restart: unless-stopped
+    # 127.0.0.1, not localhost: Alpine resolves localhost to IPv6 first and nginx
+    # listens on IPv4 only, so the check would fail on a healthy container.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

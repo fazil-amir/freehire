@@ -4,11 +4,15 @@ Guidance for AI agents working in this directory.
 
 ## What this is
 
-An internal ops tool for managing which ATS/aggregator/career-site "boards"
-get added to freehire's catalog and crawled — a plain server-rendered Go
-web app (stdlib `net/http` + `html/template`, no framework) that replaces
+An internal ops service for managing which ATS/aggregator/career-site
+"boards" get added to freehire's catalog and crawled — a plain Go HTTP
+service (stdlib `net/http`, no framework) serving a JSON API that replaces
 what used to be hand-editing `combined_boards.csv` and running one-off
 commands against the running freehire stack.
+
+**It has no UI.** The UI is a separate web app in its own repository that
+only ever talks to this API; a change that needs a screen goes there, and a
+change here that alters a response shape must be matched there.
 
 **It is not a freehire feature.** It is a separate Go module living in a
 subfolder of this repo so that pulling upstream freehire updates
@@ -51,40 +55,35 @@ suggest the alternative rather than doing it.
 ```
 board-console/
   main.go              wiring: stores, Runner, Scheduler, routes, App struct
-  auth.go               hardcoded creds (see README's Credentials section),
-                        session cookie, requireAuth middleware
+  api.go               the API's middleware (key, CORS), errors, and the
+                        catalog/providers/schedule-save routes
+  api_pages.go         the schedules, system-jobs, runs and activity routes
   csvstore.go           combined_boards.csv: load/backfill/atomic save,
                         DistinctProviders/AddedProviders/FullyAddedProviders
   db.go                 read-only Postgres: DBStore.AddedCounts,
                         resolveAddedCounts (the DB-or-stale-CSV-fallback
-                        pattern every page-data builder uses)
+                        pattern every view builder uses)
   runner.go             drives the freehire binaries as subprocesses —
                         the ingest semaphore, the reindex coalescing loop,
                         Runner.FullyAdded
   schedule.go            schedule.json: Schedule, ScheduleStore
-                        (Add/Update/Delete/Toggle/Get), Scheduler (the
-                        1-minute tick)
+                        (Add/Update/Delete/Toggle), Scheduler (the 1-minute
+                        tick)
+  system_jobs.go         system.json: the dead-board cleanup and company
+                        recount's time, pause and last run
   activity.go            activity.jsonl: ActivityLog ring buffer + JSONL
                         persistence, the file-size bounding, Run/RunStatus
+  jobs.go / outcome.go   runs grouped into jobs; a run's result read from
+                        its own output
   providerkind.go        the hand-maintained provider -> kind map,
                         displayName() (Aggregator's auto-filled company)
-  templates.go           embed.FS + html/template loading
-  respond.go             how a POST action answers: 204/422 to app.js's
-                        fetch, a redirect back to the referring page
-                        otherwise (isFetch, actionDone, actionError)
-  handlers_*.go          one file per screen: catalog (which is
-                        also the providers view), schedules, activity — each owns its
-                        build*PageData function and HTTP handlers
-  templates/*.html        one {{define}} per page/fragment; catalog.html +
-                        catalog-results.html split because the latter is
-                        also the real-time search AJAX fragment;
-                        schedule_modal.html is the ONE add/edit schedule
-                        dialog, included by every page that needs it
-  static/{style.css,app.js}  the whole frontend — no build step, no bundler
+  handlers_*.go          the views the API serves — catalog, schedules,
+                        activity, system — each owns its build* function
+                        and the domain helpers behind its actions
   data/                  the persistent files (see README) — a
                         docker-compose bind mount. Only combined_boards.csv
                         is tracked; activity.jsonl, schedule.json and
-                        cleanup.json are per-machine and git-ignored
+                        system.json are per-machine and git-ignored
   *_test.go              table-driven tests beside the code they cover
                         (no separate test package)
 ```
@@ -115,7 +114,7 @@ board-console/
   included, so docker-compose must give board-console the SAME value as the
   app (both read `${CATALOGUE_TECH_ONLY:-false}`). A crawl that disagrees
   with the site about the catalogue's scope stores or drops the wrong jobs.
-  The top-bar badge (`scope.go`) mirrors freehire's parsing rule.
+  `/api/v1/meta`'s `techOnly` (`scope.go`) mirrors freehire's parsing rule.
 - **Catalogue-wide Meilisearch rebuilds share `Runner.heavyMu`** (jobs
   reindex, reindex-companies). freehire guards them with an advisory lock
   that makes the loser SKIP and exit 0, so without the mutex a company
@@ -125,67 +124,35 @@ board-console/
   It must also delete the provider's schedules: a crawl adds whatever boards
   are missing, so a surviving schedule would silently re-add them all.
 - **`ActivityLog.List()` returns snapshot copies.** Running Runs are written
-  by their subprocess goroutine; never hand a live `*Run` to a page.
-- **Every page's "added" figure goes through `resolveAddedCounts` in
+  by their subprocess goroutine; never hand a live `*Run` to a response.
+- **Every view's "added" figure goes through `resolveAddedCounts` in
   `db.go`.** It reads Postgres when reachable and falls back to the CSV's
-  frozen `added` column (with a banner) when it isn't. A new page or query
-  that needs added status should call this, not read `BoardRow.Added`
-  directly or query the DB itself — the fallback-and-banner behavior is
-  the point, and duplicating the DB call bypasses it.
+  frozen `added` column (reported as `dbError`) when it isn't. A new view or
+  query that needs added status should call this, not read `BoardRow.Added`
+  directly or query the DB itself — the fallback-and-report behavior is the
+  point, and duplicating the DB call bypasses it.
 - **"Fully added" has exactly one correct definition**:
   `CSVStore.FullyAddedProviders()` / `Runner.FullyAdded()` — every one of
   a provider's candidate rows added, not just one. An earlier version
   checked "any row added," which silently left a partially-added
   provider's remaining rows un-added forever; if you're about to write a
   new added-ness check, use the existing one instead.
-- **Row actions never navigate.** Kebab items and Catalog's Crawl buttons
-  are `<form data-async>`, and the schedule dialog submits the same way:
-  app.js POSTs them with the `X-Board-Console-Fetch` header, confirms with
-  a toast, and re-renders the page's `[data-live-region]` in place when
-  the table changed. Handlers finish through `actionDone` (`respond.go`),
-  never a hard-coded redirect — and never to `/activity`, which is a page
-  the operator visits, not one they are sent to. The forms keep a real
-  `action` so they still work without JS.
-- **Every add/edit form round-trips on a validation failure** — the
-  pattern in `handleNewProvider` and `handleScheduleSave`: a fetch caller
-  gets a 422 with the message (`actionError`); a plain form post re-renders
-  the SAME page template with the submitted values filled back in and the
-  modal flagged to reopen, never a redirect that loses what was typed.
-  Client-side JS validation exists too but is never the source of truth;
-  the server check is what actually protects the data.
-- **Kebab menus are `position: fixed`**, placed at their button by app.js
-  and flipped upward near the viewport bottom. `.table-card` clips its
-  overflow for its rounded corners, so an absolutely positioned menu was
-  cut off in a short table. Layering lives in two tokens, `--z-dropdown`
-  and `--z-toast`; use them rather than a literal z-index.
-- **Every dialog is header / body / footer** (`.dialog-header`,
-  `.dialog-body`, `.dialog-actions`), closed by any `[data-dialog-close]`
-  or a backdrop click — both handled once in app.js. Follow that shape for
-  a new dialog rather than styling one by hand.
-- **Kind-driven fields in "+ New provider"** (`handlers_catalog.go`,
-  `app.js`): an ATS platform needs Provider+Board+Company, an Aggregator
-  needs Provider only (Board forced blank, Company auto-derived via
-  `displayName()`), a Career site needs Provider+Company (Board forced
-  blank). Enforced in JS for the live show/hide AND server-side as a
-  fallback — the two must be kept in sync if the rules change; JS's
-  `displayName()` in `app.js` deliberately mirrors Go's in
-  `providerkind.go` line for line.
-- **Templates are one global namespace.** `templates.go` parses every file
-  under `templates/*.html` together, so every `{{define "name"}}` must be
-  unique across the whole directory — two files defining the same name
-  silently shadow each other with no compile error.
-- **CSS is one file, one fixed dark palette** (`static/style.css`) — no
-  light/dark media query, unlike freehire's own design system. The tokens
-  at the top (`--bg`, `--surface`, `--accent`, ...) are board-console's
-  own identity (graphite surfaces #242529/#2C2D33/#373841 with one lavender
-  accent #A3A7F6, taken from a dark dashboard design; colour otherwise only
-  for status and the Activity action pills), deliberately not a copy of
-  freehire's brand green. Keep small text at 4.5:1 or better — `--text-faint`
-  was lifted from the design's #858C95 for exactly that; keep
-  new component styles referencing those custom properties rather than
-  literal colors.
+- **The API is the only interface, and it has no login.** `apiMiddleware`
+  (`api.go`) wraps every route: `BOARD_CONSOLE_API_KEY` set means a Bearer
+  key is required, unset means open (local only); browsers are admitted by
+  `BOARD_CONSOLE_CORS_ORIGINS`, whose preflight the middleware answers. Every
+  error is `{"error": msg}` through `actionError`, with the status a UI can
+  act on (409 "already running", 422 validation, 503 database/model
+  unavailable). A new route goes through the same `api(...)` registration so
+  it is never mounted without the guard.
+- **Validation lives here, not in a UI.** A UI may check fields first for a
+  nicer message, but `addProviderRow` (the kind rules: an ATS platform needs
+  provider+board+company, an Aggregator the provider only with board forced
+  blank and company derived by `displayName()`, a Career site provider+company
+  with board forced blank) and `saveSchedule` are what protect the data, and
+  their messages are the ones a UI shows.
 - **Runtime state never goes through git.** `activity.jsonl`,
-  `schedule.json` and `cleanup.json` are git-ignored because committing them
+  `schedule.json` and `system.json` are git-ignored because committing them
   copied one machine's schedules and history onto another (a laptop's
   15-minute schedule started crawling on the VPS). Every store must keep
   starting cleanly from a missing file. `combined_boards.csv` IS tracked —
@@ -201,7 +168,7 @@ go build ./...
 go vet ./...
 go test ./...               # table-driven, no external deps, no testcontainers
 
-go build -o /tmp/bc .        # local smoke-testing binary
+go build -o /tmp/bc .        # local smoke-testing binary (API on :8091/api/v1)
 DATA_DIR=/tmp/some-copy PORT=8091 \
   INGEST_BIN=... REINDEX_BIN=... BULK_ADD_BOARDS_BIN=... \
   /tmp/bc                    # override binaries to test without the real ones

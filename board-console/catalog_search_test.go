@@ -52,7 +52,7 @@ func TestBuildCatalog_CountsBoardsByFreehireIdentityNotRows(t *testing.T) {
 	}
 	out := buildCatalog(rows, "", "", map[string]int{"ashby": 2, "jobdanmark": 1})
 	for _, p := range out {
-		if !p.FullyAdded() {
+		if p.AddedCount != p.CompanyCount { // fully added
 			t.Errorf("%s: want fully added, got %d/%d", p.Provider, p.AddedCount, p.CompanyCount)
 		}
 	}

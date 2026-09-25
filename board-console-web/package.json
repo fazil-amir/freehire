@@ -1,0 +1,25 @@
+{
+  "name": "board-console-web",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Board Console's UI: a standalone React app over Board Console's JSON API (/api/v1).",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-router-dom": "^7.6.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "^5.8.0",
+    "vite": "^7.0.0"
+  }
+}

@@ -101,7 +101,7 @@ func (s Schedule) Due(now time.Time) bool {
 }
 
 // NextRun is when the schedule next crawls — the zero time when it is due
-// right now (the template shows "due now" or "queued").
+// right now (shown as "due now" or "queued").
 func (s Schedule) NextRun() time.Time {
 	now := time.Now().Round(0)
 	if s.Due(now) {
@@ -342,18 +342,6 @@ func (s *ScheduleStore) Add(provider string, times []int) error {
 	s.markServedLocked(len(s.schedules)-1, time.Now().Round(0))
 	s.mu.Unlock()
 	return s.save()
-}
-
-// Get returns one schedule by ID, for pre-filling the edit modal.
-func (s *ScheduleStore) Get(id string) (Schedule, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, sch := range s.schedules {
-		if sch.ID == id {
-			return sch, true
-		}
-	}
-	return Schedule{}, false
 }
 
 // ByProvider returns provider's schedule, if it has one.

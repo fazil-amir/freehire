@@ -218,6 +218,10 @@ services:
       # only waits for it to start, the same as the app service already does.
       meilisearch:
         condition: service_started
+      # Its only way to Docker (the Server card's build cache): started with it,
+      # so bringing board-console up alone never leaves the card "not reachable".
+      docker-proxy:
+        condition: service_started
     environment:
       PORT: "8091"
       DATABASE_URL: "postgres://hire:hire@db:5432/hire?sslmode=disable"
@@ -239,8 +243,8 @@ services:
       # inherits it, and a crawl that disagrees with the site about what belongs in the
       # catalogue stores (or drops) the wrong jobs. Override both at once from .env.
       CATALOGUE_TECH_ONLY: "${CATALOGUE_TECH_ONLY:-false}"
-      # "Explain this run" on the Activity page. Put the key in .env (never in
-      # this file); unset leaves the button disabled. OPENAI_MODEL defaults to
+      # "Explain this run" (POST /api/v1/runs/{id}/explain). Put the key in .env (never
+      # in this file); unset makes it answer 503. OPENAI_MODEL defaults to
       # gpt-4o-mini; OPENAI_BASE_URL points at an OpenAI-compatible gateway.
       # How many scheduled crawls may run at the same time: the Schedules page
       # plans every provider's times around it. Unset (or unreadable) means 2.
@@ -251,12 +255,17 @@ services:
       # The Server card's build-cache figure and its Clear button (see docker-proxy).
       # Set it empty in .env to turn both off.
       DOCKER_PROXY_URL: "${DOCKER_PROXY_URL-http://docker-proxy:2375}"
+      # The JSON API (/api/v1) a separate UI drives. A set key is required as
+      # "Authorization: Bearer <key>"; unset leaves the API open — local use only.
+      # CORS_ORIGINS lists the browser origins allowed to call it (comma list).
+      BOARD_CONSOLE_API_KEY: "${BOARD_CONSOLE_API_KEY:-}"
+      BOARD_CONSOLE_CORS_ORIGINS: "${BOARD_CONSOLE_CORS_ORIGINS:-http://localhost:5173}"
     ports:
       # Host port 8040 (8091 clashes with Beszel). Override with BOARD_CONSOLE_HOST_PORT.
       - "${BOARD_CONSOLE_HOST_PORT:-8040}:8091"
     volumes:
       # board-console's only persistent store, kept on the host across rebuilds. Only
-      # combined_boards.csv is in git; activity/schedule/cleanup are per machine
+      # combined_boards.csv is in git; activity/schedule/system are per machine
       # (git-ignored). Write access for the container (uid 65532) is set up by
       # board-console-init above.
       - ./board-console/data:/app/data
