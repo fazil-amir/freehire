@@ -22,6 +22,7 @@ type systemStats struct {
 		Cores int     `json:"cores"`
 	} `json:"cpu"`
 	ReindexFloorGB int         `json:"reindexFloorGB"`
+	Running        int         `json:"running"`    // jobs in flight, for the sidebar's Activity pulse
 	Docker         bool        `json:"docker"`     // the proxy is configured
 	BuildCache     *buildCache `json:"buildCache"` // null when Docker could not be asked
 	DockerError    string      `json:"dockerError,omitempty"`
@@ -30,6 +31,11 @@ type systemStats struct {
 func handleSystemStats(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		s := systemStats{ReindexFloorGB: reindexFloorGB(), Docker: app.docker.Enabled()}
+		for _, j := range buildJobs(app.activity.List()) {
+			if j.Running() {
+				s.Running++
+			}
+		}
 		if d, ok := diskUsage(statsDiskPath(app.dataDir)); ok {
 			s.Disk = &d
 		}

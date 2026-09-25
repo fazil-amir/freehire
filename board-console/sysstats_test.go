@@ -98,7 +98,8 @@ func TestBuildCachePrune_RecordsAnActivityJob(t *testing.T) {
 }
 
 func TestSystemStats_WithoutDockerStillAnswers(t *testing.T) {
-	app := &App{docker: &DockerProxy{}, cpu: &CPUSampler{}, dataDir: t.TempDir()}
+	_, _, activity := newTestScheduler(t)
+	app := &App{activity: activity, docker: &DockerProxy{}, cpu: &CPUSampler{}, dataDir: t.TempDir()}
 	rec := httptest.NewRecorder()
 	handleSystemStats(app)(rec, httptest.NewRequest(http.MethodGet, "/system/stats", nil))
 	var s systemStats
@@ -107,5 +108,16 @@ func TestSystemStats_WithoutDockerStillAnswers(t *testing.T) {
 	}
 	if s.Docker || s.BuildCache != nil || s.Disk == nil || s.Disk.Total == 0 {
 		t.Errorf("want disk measured and Docker off, got %s", rec.Body)
+	}
+	if s.Running != 0 {
+		t.Errorf("nothing runs yet, got running=%d", s.Running)
+	}
+
+	// A job in flight is counted, for the sidebar's Activity pulse.
+	activity.Start("ingest", "acme", activity.NewJob())
+	rec = httptest.NewRecorder()
+	handleSystemStats(app)(rec, httptest.NewRequest(http.MethodGet, "/system/stats", nil))
+	if err := json.Unmarshal(rec.Body.Bytes(), &s); err != nil || s.Running != 1 {
+		t.Errorf("want running=1 while a crawl runs, got %s (%v)", rec.Body, err)
 	}
 }

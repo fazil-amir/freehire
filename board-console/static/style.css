@@ -139,6 +139,39 @@ h1, h2 { font-weight: 600; }
 .side-nav a:hover, .logout-form button:hover { color: var(--text); background: var(--surface); }
 .side-nav a.active { color: var(--text); background: var(--surface-raised); }
 .side-nav a.active svg { color: var(--accent); opacity: 1; }
+/* The Activity item's "something is running" pulse (app.js), with a count
+   when more than one job is. */
+.nav-live {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.nav-live[hidden] { display: none; }
+.nav-live-dot {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.nav-live-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: nav-live-ping 1.6s ease-out infinite;
+}
+@keyframes nav-live-ping {
+  from { transform: scale(1); opacity: 0.7; }
+  to { transform: scale(2.6); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .nav-live-dot::after { animation: none; } }
 .sidebar-end { margin-top: auto; display: flex; flex-direction: column; gap: 10px; }
 
 /* The Server card: disk, memory, CPU and the build cache, polled. */
@@ -914,6 +947,7 @@ code {
   font-variant-numeric: tabular-nums;
 }
 .tl-tick.minor { opacity: 0.6; }
+.tl-tick.end { transform: translateX(-100%); }
 /* Below ~45px an hour, "00:00" no longer fits its column: keep every
    third label only. */
 @container (max-width: 1080px) { .tl-tick.minor { display: none; } }

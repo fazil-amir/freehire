@@ -368,8 +368,10 @@ function drawPlan() {
   // 3-hourly labels hide on a narrow screen.
   var scale = table.querySelector("[data-plan-scale]");
   scale.replaceChildren();
-  for (var h = 0; h < 24; h++) {
-    var t = el("span", h % 3 ? "tl-tick minor" : "tl-tick", scale);
+  // 24:00 closes the day at the track's right edge (right-aligned there, so
+  // it does not spill into the next column).
+  for (var h = 0; h <= 24; h++) {
+    var t = el("span", h === 24 ? "tl-tick end" : h % 3 ? "tl-tick minor" : "tl-tick", scale);
     t.style.left = pct(h * 60);
     t.textContent = String(h).padStart(2, "0") + ":00";
   }
@@ -1216,7 +1218,17 @@ function showScheduleError(dialog, message) {
     n.hidden = !note;
   }
 
+  // The Activity nav item pulses, with a count, while any job runs.
+  var activityLive = document.querySelector("[data-activity-live]");
+  function renderActivity(n) {
+    if (!activityLive) return;
+    activityLive.hidden = !n;
+    activityLive.querySelector("[data-activity-count]").textContent = n > 1 ? String(n) : "";
+    activityLive.title = n === 1 ? "A job is running" : n + " jobs running";
+  }
+
   function render(s) {
+    renderActivity(s.running || 0);
     var d = s.disk;
     meter("disk", d && d.total ? d.used / d.total * 100 : null,
       d ? size(d.used) + " of " + size(d.total) : "",
