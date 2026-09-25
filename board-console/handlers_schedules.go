@@ -300,8 +300,6 @@ type systemRow struct {
 	NextRun time.Time // zero while paused
 	Running bool      // a run of it is in flight, however it was started
 	Slot    string    // its one daily run as slotRun JSON, like a schedule's Slots
-	// LatestRun is its newest job's main run, for the log under the row.
-	LatestRun *Run
 }
 
 // LastBadge is the last run's status in the words the provider rows use.
@@ -317,11 +315,8 @@ func buildSystemRows(settings []SystemJob, jobs map[string][]*Job, now time.Time
 	for _, j := range settings {
 		info, _ := systemJobInfoOf(j.Key)
 		row := systemRow{SystemJob: j, Info: info, NextRun: j.NextRun(now)}
-		if list := jobs[j.Key]; len(list) > 0 {
-			row.LatestRun = list[0].mainStep().Run
-			for _, job := range list {
-				row.Running = row.Running || job.Running()
-			}
+		for _, job := range jobs[j.Key] {
+			row.Running = row.Running || job.Running()
 		}
 		// Its square: the job that served its latest slot — the same rule
 		// as a schedule's (slotRuns) — however it was started.

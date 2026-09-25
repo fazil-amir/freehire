@@ -1,3 +1,43 @@
+// The server HTML of every [data-patch] piece of a [data-patch-region], as
+// last rendered — recorded before anything below touches the page, so a
+// live refresh can tell which pieces the server actually changed (see
+// patchRegion).
+var patchSrc = {};
+document.querySelectorAll("[data-patch-region] [data-patch]").forEach(function (el) {
+  patchSrc[el.dataset.patch] = el.outerHTML;
+});
+
+// A live refresh of a [data-patch-region]: only the [data-patch] pieces
+// whose server HTML changed are swapped, one element each, so everything
+// else — an open log, a hover, where the table is scrolled — stays exactly
+// as it is. When pieces were added or removed (a schedule saved or
+// deleted) it falls back to swapping the whole region.
+function patchRegion(region, fresh) {
+  function keyed(root) {
+    var m = {};
+    root.querySelectorAll("[data-patch]").forEach(function (el) { m[el.dataset.patch] = el; });
+    return m;
+  }
+  var olds = keyed(region), news = keyed(fresh);
+  var keys = Object.keys(news);
+  var same = keys.length === Object.keys(olds).length && keys.every(function (k) { return olds[k]; });
+  if (!same) {
+    region.innerHTML = fresh.innerHTML;
+    patchSrc = {};
+    keys.forEach(function (k) { patchSrc[k] = news[k].outerHTML; });
+    return;
+  }
+  keys.forEach(function (k) {
+    var html = news[k].outerHTML;
+    if (patchSrc[k] === html) return;
+    patchSrc[k] = html;
+    var hidden = olds[k].hidden; // a filter may have hidden it
+    var next = document.importNode(news[k], true);
+    next.hidden = hidden;
+    olds[k].replaceWith(next);
+  });
+}
+
 // Shows an inline error message right next to a field, for client-side
 // validation — server-side validation (the source of truth) uses the
 // equivalent Go-rendered .field-error instead.
@@ -77,7 +117,9 @@ function refreshLiveRegion() {
       if (!html) return;
       var fresh = new DOMParser().parseFromString(html, "text/html").querySelectorAll("[data-live-region]");
       regions.forEach(function (region, i) {
-        if (fresh[i]) region.innerHTML = fresh[i].innerHTML;
+        if (!fresh[i]) return;
+        if (region.hasAttribute("data-patch-region")) patchRegion(region, fresh[i]);
+        else region.innerHTML = fresh[i].innerHTML;
       });
       document.dispatchEvent(new Event("liveregion:refreshed"));
     });
@@ -88,12 +130,9 @@ function refreshLiveRegion() {
 // clicks on the row's own controls (a toggle, a kebab) are theirs, not this.
 document.addEventListener("click", function (e) {
   var row = e.target.closest(".run-row");
-  // A timeline square with a run opens that run instead (showSlotLog).
-  if (!row || e.target.closest("button, a, form, input, select, .tl-block[data-run]")) return;
+  if (!row || e.target.closest("button, a, form, input, select")) return;
   var detail = document.getElementById("detail-" + row.dataset.runId);
-  if (!detail) return;
-  resetSlotLog(detail);
-  detail.hidden = !detail.hidden;
+  if (detail) detail.hidden = !detail.hidden;
 });
 
 // Click a .job-row (Activity) to show or hide its steps. Closing a job also
@@ -293,6 +332,7 @@ document.addEventListener("liveregion:refreshed", localizeTimes);
 // (their own tbody) are drawn the same way but never sorted or counted. Every mark sits on the moment it stands for — an
 // hour label on its gridline, a run's square centred on its start, the
 // "now" line — and rows are ordered by their first run of the viewer's day.
+var slotShown = {}; // a plan row's log panel (detail row) id → the run shown in it (see showSlotLog)
 function drawPlan() {
   var table = document.querySelector("[data-plan]");
   var src = document.getElementById("timeline-data");
@@ -305,15 +345,14 @@ function drawPlan() {
   function pct(min) { return (min / DAY * 100) + "%"; }
   function el(tag, cls, parent) { var e = document.createElement(tag); if (cls) e.className = cls; if (parent) parent.appendChild(e); return e; }
   function hhmm(min) { var m = local(min); return String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0"); }
-  // A run's square: centred on its start, one 15-minute slot wide (CSS caps
-  // it and keeps it square).
+  // A run's square: centred on its start (its size is CSS's).
   function square(track, startUTC, cls, label) {
     var b = el("div", cls, track);
     b.style.left = pct(local(startUTC));
-    b.style.width = "max(6px, " + pct(15) + ")";
     b.title = label;
     return b;
   }
+  var nowMin = new Date().getHours() * 60 + new Date().getMinutes();
   function slots(track) { try { return JSON.parse(track.dataset.slots || "[]"); } catch (e) { return []; } }
   function times(track) { return slots(track).map(function (x) { return x.m; }); }
   var STATUS = { success: "success", partial: "partial", failed: "failed", running: "running", pending: "not run yet", none: "no run" };
@@ -354,10 +393,20 @@ function drawPlan() {
     var nextUTC = next ? next.getUTCHours() * 60 + next.getUTCMinutes() : -1;
     slots(track).forEach(function (x) {
       var isNext = x.m === nextUTC;
-      var label = track.dataset.provider + " · " + hhmm(x.m) + " — last run: " + STATUS[x.s] +
+      // Later today (in the viewer's day) it has not run yet: its latest
+      // run was yesterday's, which this day's plan does not show.
+      if (local(x.m) > nowMin) {
+        square(track, x.m, cls + " run-upcoming" + (isNext ? " next" : ""),
+          track.dataset.provider + " · " + hhmm(x.m) + " — later today" + (isNext ? " (next run)" : ""));
+        return;
+      }
+      var label = track.dataset.provider + " · " + hhmm(x.m) + " — " + STATUS[x.s] +
         (x.at ? " (" + ago(x.at) + ")" : "") + (x.sum ? " · " + x.sum : "") + (isNext ? "\nNext run" : "");
       var b = square(track, x.m, cls + " run-" + x.s + (isNext ? " next" : ""), label + (x.run ? "\nClick for its log" : ""));
-      if (x.run) b.dataset.run = x.run;
+      if (x.run) {
+        b.dataset.run = x.run;
+        b.dataset.label = track.dataset.provider + " · " + hhmm(x.m);
+      }
     });
   }
   var tracks = Array.prototype.slice.call(table.querySelectorAll("[data-plan-track]"));
@@ -381,6 +430,10 @@ function drawPlan() {
   });
   var nomatch = body.querySelector(".plan-nomatch");
   if (nomatch) body.appendChild(nomatch);
+  Object.keys(slotShown).forEach(function (id) {
+    var detail = document.getElementById(id);
+    if (detail) markSlot(detail, slotShown[id]);
+  });
 
   // "Now", as a share of the day: every timeline cell draws its line there.
   var now = new Date();
@@ -457,37 +510,37 @@ function applyPlanFilters() {
 drawPlan();
 document.addEventListener("liveregion:refreshed", drawPlan);
 
-// Click a square on the plan: the run that served that time opens under its
-// row, in place of the row's latest log (fetched from /schedules/run, the
-// same "run-log" fragment). Clicking the same square again closes it;
-// clicking the row goes back to its latest log. What is open is kept
-// through the page's live refreshes.
-var slotShown = {}; // detail row id → run id shown in it
-function resetSlotLog(detail) {
-  delete slotShown[detail.id];
-  var slot = detail.querySelector("[data-slot-log]"), latest = detail.querySelector("[data-latest-log]");
-  if (slot) { slot.hidden = true; slot.replaceChildren(); }
-  if (latest) latest.hidden = false;
-  markSlot(detail, null);
-}
+// Click a square on the plan (only one that ran: a past time of today):
+// the run that served that time opens in the panel under its row, fetched
+// from /schedules/run. Clicking it again, or ✕, closes it; clicking another
+// square switches to that run. The row itself is not clickable. The panel
+// is left alone by live refreshes (patchRegion); only a run still going is
+// re-read, keeping the log's scroll position.
 function markSlot(detail, runId) {
   var row = detail.previousElementSibling;
   if (!row) return;
   row.querySelectorAll(".tl-block.selected").forEach(function (b) { b.classList.remove("selected"); });
   if (runId) row.querySelectorAll('.tl-block[data-run="' + runId + '"]').forEach(function (b) { b.classList.add("selected"); });
 }
-function showSlotLog(detail, runId) {
-  var slot = detail.querySelector("[data-slot-log]"), latest = detail.querySelector("[data-latest-log]");
-  if (!slot) return;
+function closeSlotLog(detail) {
+  delete slotShown[detail.id];
+  detail.hidden = true;
+  detail.querySelector("[data-slot-log]").replaceChildren();
+  markSlot(detail, null);
+}
+function showSlotLog(detail, runId, title) {
+  var box = detail.querySelector("[data-slot-log]");
   fetch("/schedules/run?id=" + encodeURIComponent(runId), { headers: { "X-Board-Console-Fetch": "1" } })
     .then(function (r) {
       if (r.status === 401) window.location.href = "/login";
       return r.text().then(function (t) { if (!r.ok) throw new Error(t || "Could not load this run."); return t; });
     })
     .then(function (html) {
-      slot.innerHTML = html;
-      slot.hidden = false;
-      if (latest) latest.hidden = true;
+      var same = slotShown[detail.id] === runId;
+      var pre = box.querySelector(".run-output"), top = pre ? pre.scrollTop : 0;
+      box.innerHTML = html;
+      if (same && (pre = box.querySelector(".run-output"))) pre.scrollTop = top;
+      if (title) detail.querySelector("[data-slot-title]").textContent = title;
       detail.hidden = false;
       slotShown[detail.id] = runId;
       markSlot(detail, runId);
@@ -496,23 +549,25 @@ function showSlotLog(detail, runId) {
     .catch(function (err) { toast(err.message.trim(), true); });
 }
 document.addEventListener("click", function (e) {
+  var close = e.target.closest("[data-slot-close]");
+  if (close) { closeSlotLog(close.closest(".slot-detail")); return; }
   var sq = e.target.closest(".tl-block[data-run]");
   if (!sq) return;
-  var row = sq.closest(".run-row");
+  var row = sq.closest(".plan-row");
   var detail = row && document.getElementById("detail-" + row.dataset.runId);
   if (!detail) return;
-  if (!detail.hidden && slotShown[detail.id] === sq.dataset.run) {
-    detail.hidden = true;
-    resetSlotLog(detail);
-    return;
-  }
-  showSlotLog(detail, sq.dataset.run);
+  if (!detail.hidden && slotShown[detail.id] === sq.dataset.run) { closeSlotLog(detail); return; }
+  showSlotLog(detail, sq.dataset.run, sq.dataset.label);
 });
 document.addEventListener("liveregion:refreshed", function () {
   Object.keys(slotShown).forEach(function (id) {
     var detail = document.getElementById(id);
-    if (detail) showSlotLog(detail, slotShown[id]);
-    else delete slotShown[id];
+    if (!detail) { delete slotShown[id]; return; }
+    var sq = detail.previousElementSibling && detail.previousElementSibling.querySelector('.tl-block[data-run="' + slotShown[id] + '"]');
+    // A full swap (a schedule added or removed) empties the panel; a run
+    // still going has a growing log. Anything else is left as it is.
+    var empty = !detail.querySelector("[data-slot-log]").childElementCount;
+    if (empty || (sq && sq.classList.contains("run-running"))) showSlotLog(detail, slotShown[id], sq && sq.dataset.label);
   });
 });
 // Keep the "now" line moving between refreshes.

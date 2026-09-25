@@ -43,7 +43,6 @@ func parseTemplates() (*Templates, error) {
 		"techOnly":        catalogueTechOnly,
 		"explainSections": explainSections,
 		"timeRow":         newTimeRow,
-		"runLog":          runLog,
 		// joinInts renders a schedule's times for a data attribute: "30,540".
 		"joinInts": func(ns []int) string {
 			parts := make([]string, len(ns))

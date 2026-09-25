@@ -841,9 +841,9 @@ code {
 .tabs button.active { background: var(--accent-muted); color: var(--accent); }
 .tabs button:hover:not(.active) { background: var(--surface-raised); color: var(--text); }
 
-.plan-col-provider { width: 280px; }
-.plan-col-toggle { width: 100px; }
-.plan-col-actions { width: 60px; }
+.plan-col-provider { width: 210px; }
+.plan-col-toggle { width: 84px; }
+.plan-col-actions { width: 48px; }
 
 /* Provider cell: the name, and under it how its last crawl went. */
 .plan-name { font-weight: 500; }
@@ -856,7 +856,14 @@ code {
   font-size: 12px;
   color: var(--text-faint);
 }
-.plan-last .badge { font-size: 11px; padding: 1px 8px; }
+/* The last run's result, as the same square the timeline uses. */
+.status-dot {
+  flex: none;
+  width: 11px;
+  aspect-ratio: 1;
+  border-radius: 3px;
+  background: var(--accent);
+}
 .tl-per { margin-left: 4px; color: var(--text-faint); font-size: 12px; font-weight: 400; }
 
 /* The timeline column. Its cells share one geometry — 12px of padding
@@ -917,17 +924,15 @@ code {
 }
 .plan-table thead tr.plan-load .tl-track { height: 30px; }
 
-/* Run and load blocks are squares centred on their start time: the width
-   (set by app.js) is one 15-minute slot's, the height follows it, capped
-   so a wide screen does not outgrow the row. */
+/* Run and load blocks are centred on their start time, one fixed size. */
 .tl-block,
 .tl-slot {
   position: absolute;
   top: 50%;
   transform: translate(-50%, -50%);
-  max-width: 22px;
+  width: 11px;
   aspect-ratio: 1;
-  border-radius: 5px;
+  border-radius: 3px;
   background: var(--accent);
   box-shadow: 0 0 0 1px var(--surface);
 }
@@ -935,12 +940,15 @@ code {
    start there, so it deepens as it fills; past it, red. */
 .tl-slot.over { background: var(--danger); }
 /* A run, by how its latest occurrence went. */
-.tl-block.run-success { background: var(--success); }
-.tl-block.run-partial { background: var(--warning); }
-.tl-block.run-failed { background: var(--danger); }
-.tl-block.run-running { background: var(--accent); animation: run-pulse 1.4s ease-in-out infinite; }
-.tl-block.run-pending { background: var(--accent); }
-.tl-block.run-none { background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--text-faint), 0 0 0 1px var(--surface); }
+:is(.tl-block, .status-dot).run-success { background: var(--success); }
+:is(.tl-block, .status-dot).run-partial { background: var(--warning); }
+:is(.tl-block, .status-dot).run-failed { background: var(--danger); }
+:is(.tl-block, .status-dot).run-running { background: var(--accent); animation: run-pulse 1.4s ease-in-out infinite; }
+:is(.tl-block, .status-dot).run-pending { background: var(--accent); }
+:is(.tl-block, .status-dot).run-none { background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--text-faint), 0 0 0 1px var(--surface); }
+/* Later today: not run yet, so no result — a faint outline. */
+.tl-block.run-upcoming { background: var(--surface); box-shadow: inset 0 0 0 1.5px rgba(163, 167, 246, 0.45), 0 0 0 1px var(--surface); }
+.tl-block.run-upcoming.next { box-shadow: inset 0 0 0 1.5px var(--accent), 0 0 0 2px var(--surface), 0 0 0 3.5px var(--text); }
 @keyframes run-pulse { 50% { opacity: 0.45; } }
 /* A square with a run opens its log; the one open is outlined. */
 .tl-block[data-run] { cursor: pointer; }
@@ -953,6 +961,20 @@ code {
 .plan-table tr.paused > td:not(.col-toggle):not(.col-actions) { opacity: 0.55; }
 .plan-table tr.paused .tl-block { background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--accent); animation: none; }
 
+/* The log panel a square opens under its row. */
+.slot-log-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.slot-log-title { font-size: 12px; font-weight: 600; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.slot-log-close {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+.slot-log-close:hover { background: var(--surface-raised); color: var(--text); }
+
 /* Board Console's own daily jobs, after the providers: a group line
    naming them, round squares, and a gear by the name. */
 .plan-table tbody.plan-system tr.plan-group td {
@@ -964,7 +986,6 @@ code {
 }
 .plan-group-note { margin-left: 10px; }
 .sys-icon { margin-right: 8px; color: var(--pill-cleanup); }
-.tl-block.sys { border-radius: 50%; }
 
 /* Under the table: the summary and the legend. */
 .plan-foot {
@@ -1005,6 +1026,7 @@ code {
 .lg-partial { background: var(--warning); }
 .lg-failed { background: var(--danger); }
 .lg-none { box-shadow: inset 0 0 0 1.5px var(--text-faint); }
+.lg-upcoming { box-shadow: inset 0 0 0 1.5px rgba(163, 167, 246, 0.45); }
 .lg-next { background: var(--accent); box-shadow: 0 0 0 1.5px var(--surface), 0 0 0 3px var(--text); }
 .lg-1 { background: var(--accent); opacity: 0.5; }
 .lg-2 { background: var(--accent); }
