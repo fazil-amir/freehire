@@ -6,6 +6,8 @@ name: boardly-web
 services:
   boardly-web:
     build: .
+    # A fixed name (no project prefix, no "-1"): it is one container, never scaled.
+    container_name: boardly-web
     environment:
       API_BASE_URL: ${API_BASE_URL:-}
       API_KEY: ${API_KEY:-}
@@ -13,7 +15,8 @@ services:
     # (BOARDLY_CORS_ORIGINS) is the same whichever way the app runs.
     ports:
       - "${WEB_PORT:-5173}:80"
-    # Keeps it running: back after a crash or a host reboot, until stopped by hand.
+    # Keeps it running: back after a crash or a host reboot, until stopped by hand
+    # (Docker itself must start on boot: `sudo systemctl enable docker`).
     restart: unless-stopped
     # 127.0.0.1, not localhost: Alpine resolves localhost to IPv6 first and nginx
     # listens on IPv4 only, so the check would fail on a healthy container.

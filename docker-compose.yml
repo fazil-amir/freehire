@@ -1,3 +1,8 @@
+# Every long-running service below restarts on its own after a crash or a host
+# reboot (restart: unless-stopped) — for that, Docker itself must start on boot:
+# `sudo systemctl enable docker`. A service stopped by hand stays stopped. The
+# one-shot init services (s3-init, boardly-api-init) carry no policy on purpose:
+# they exit when done, and a restart policy would rerun them forever.
 services:
   db:
     # pgvector's build, not stock postgres: migration 0092 runs `CREATE EXTENSION
@@ -6,6 +11,7 @@ services:
     # (18) as the stock image it replaces, so the version-subdirectory volume
     # behaviour noted below is unaffected.
     image: pgvector/pgvector:pg18
+    restart: unless-stopped
     environment:
       POSTGRES_USER: hire
       POSTGRES_PASSWORD: hire
@@ -30,6 +36,7 @@ services:
   # the model is cached in the meilisearch_data volume across restarts.
   meilisearch:
     image: getmeili/meilisearch:v1.49.0
+    restart: unless-stopped
     environment:
       MEILI_MASTER_KEY: "${MEILI_MASTER_KEY:-dev-insecure-meili-key}"
       MEILI_ENV: development
@@ -43,6 +50,7 @@ services:
   # ephemeral/TTL'd and losing them on restart is a fail-open no-op, not data loss.
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -72,6 +80,7 @@ services:
   # it on `latest` repeated the shape it was fixing.
   s3:
     image: adobe/s3mock:5.2.3
+    restart: unless-stopped
     environment:
       # Path-style addressing, which is what internal/blobstore uses against a custom
       # S3_ENDPOINT. No credentials: s3mock accepts any signature.
@@ -91,6 +100,7 @@ services:
 
   app:
     build: .
+    restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
@@ -192,6 +202,7 @@ services:
   # bits, never the owner; runs on every `make up` and is a no-op once set.
   boardly-api-init:
     image: alpine:3.20
+    container_name: boardly-api-init
     volumes:
       - ./boardly-api/data:/data
     command: >
@@ -206,6 +217,7 @@ services:
   # compose network only.
   docker-proxy:
     image: tecnativa/docker-socket-proxy:v0.4.2
+    restart: unless-stopped
     environment:
       SYSTEM: 1
       BUILD: 1
@@ -217,6 +229,9 @@ services:
     build:
       context: .
       target: boardly-api
+    # A fixed name (no project prefix, no "-1"): it is one container, never scaled.
+    container_name: boardly-api
+    restart: unless-stopped
     depends_on:
       boardly-api-init:
         condition: service_completed_successfully
@@ -290,6 +305,7 @@ services:
     build:
       context: .
       dockerfile: web/Dockerfile
+    restart: unless-stopped
     environment:
       # Public origin for canonical/sitemap/JSON-LD — match the host-facing URL.
       ORIGIN: "${WEB_ORIGIN:-http://localhost:8090}"
