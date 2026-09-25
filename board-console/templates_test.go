@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -31,5 +33,25 @@ func TestTemplates_EveryPageRenders(t *testing.T) {
 		if err := tmpl.tmpl.ExecuteTemplate(&b, name, data); err != nil {
 			t.Errorf("render %s: %v", name, err)
 		}
+	}
+}
+
+// A square's click fetches its run's log as the run-log fragment.
+func TestScheduleRun_ReturnsTheRunsLog(t *testing.T) {
+	_, _, activity := newTestScheduler(t)
+	run := activity.Start("ingest", "acme", activity.NewJob())
+	activity.AppendOutput(run, []byte("ingest done: ingested=3 failed=0\n"), true)
+	activity.Finish(run, nil)
+	app := &App{tmpl: LoadTemplates(), activity: activity, explainer: NewExplainerFromEnv()}
+
+	rec := httptest.NewRecorder()
+	handleScheduleRun(app)(rec, httptest.NewRequest("GET", "/schedules/run?id="+strconv.Itoa(run.ID), nil))
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "ingested=3") || !strings.Contains(rec.Body.String(), "data-explain") {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body)
+	}
+	rec = httptest.NewRecorder()
+	handleScheduleRun(app)(rec, httptest.NewRequest("GET", "/schedules/run?id=999999", nil))
+	if rec.Code != 404 {
+		t.Errorf("an unknown run must 404, got %d", rec.Code)
 	}
 }

@@ -536,9 +536,10 @@ func randomID() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// Scheduler ticks once a minute. It starts the built-in daily dead-board
-// cleanup when its 03:00 slot is unserved (see cleanup.go), starts every
-// schedule whose planned run has come (see Schedule.Due) while fewer than
+// Scheduler ticks once a minute. It starts the built-in dead-board cleanup
+// and company recount when their daily slot is unserved (see
+// system_jobs.go), starts every schedule whose planned run has come (see
+// Schedule.Due) while fewer than
 // SCHEDULE_CAPACITY crawls are running — the rest queue — and once an hour
 // runs ONE reindex for every scheduled crawl that finished in that hour.
 //
@@ -588,13 +589,15 @@ func (s *Scheduler) runDue() {
 	// and the schedule would run late by the length of the sleep.
 	now := time.Now().Round(0)
 
-	// The built-in daily dead-board cleanup. Started in the background; if
-	// one is already running (a "Run now"), StartCleanup declines and a
-	// later tick tries again.
-	if cleanupDue(s.runner.cleanup.State().LastRun, now) {
-		if s.runner.StartCleanup(true) {
-			log.Printf("scheduler: daily dead-board cleanup started")
-		}
+	// The system jobs (system_jobs.go), each at its daily time. Started in
+	// the background; if one is already running (started by hand), the
+	// start declines and a later tick tries again — until that run is
+	// recorded and serves the slot.
+	if s.runner.system.Get(sysCleanup).Due(now) && s.runner.StartCleanup(true) {
+		log.Printf("scheduler: daily dead-board cleanup started")
+	}
+	if s.runner.system.Get(sysRecount).Due(now) && s.runner.StartCompanyRefresh() {
+		log.Printf("scheduler: daily company recount started")
 	}
 
 	s.flushHourlyReindex(now)

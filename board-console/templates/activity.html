@@ -84,7 +84,8 @@
           <time datetime="{{iso .Cleanup.LastRun}}" data-local>{{.Cleanup.LastRun.UTC.Format "02/01/2006 - 15:04:05"}} UTC</time>{{end}}
         <span class="cleanup-sep"></span>
         <span class="muted">Next</span>
-        {{if .Cleanup.DueNow}}<span class="badge badge-running">due now</span>
+        {{if .Cleanup.Paused}}<span class="badge badge-no">paused</span>
+        {{else if .Cleanup.DueNow}}<span class="badge badge-running">due now</span>
         {{else}}<time datetime="{{iso .Cleanup.NextRun}}" data-local>{{.Cleanup.NextRun.UTC.Format "02/01/2006 - 15:04:05"}} UTC</time>{{end}}
       </div>
       {{else}}

@@ -106,6 +106,33 @@
 {{/* A model's explanation of one run, split into its labelled sections
      (see explainSections). Rendered on the page and returned by
      /activity/explain, so a fresh answer and a refreshed one look alike. */}}
+{{/* One run's log — its head line, output and Explain — as the Schedules
+     rows show it under themselves: their latest run, or the run a square
+     on the timeline was clicked for (fetched from /schedules/run). */}}
+{{define "run-log"}}
+{{with .Run}}
+<div class="run-detail-head">
+  {{if .Provider}}{{.Provider}}: {{end}}<span class="pill pill-{{.Action}}">{{.Action}}</span>
+  {{$o := .Outcome}}<span class="badge badge-{{$o.Status}}">{{$o.Status}}</span>
+  {{with $o.Summary}}<span>{{.}}</span> ·{{end}}
+  <time datetime="{{iso .StartedAt}}" data-local>{{.StartedAt.UTC.Format "02/01/2006 - 15:04:05"}} UTC</time>
+  · {{.Duration}}
+</div>
+<pre class="run-output">stdout:
+{{.Stdout}}
+
+stderr:
+{{.Stderr}}
+{{if .Err}}
+error: {{.Err}}{{end}}</pre>
+<div class="explain" data-explain-for="{{.ID}}">
+  {{with $.Explanation}}{{template "explain-answer" .}}
+  {{else}}<button type="button" class="btn btn-secondary btn-sm" data-explain="{{.ID}}"
+          {{if not $.ExplainEnabled}}disabled title="Set OPENAI_API_KEY in .env to enable"{{end}}>✦ Explain this run</button>{{end}}
+</div>
+{{end}}
+{{end}}
+
 {{define "explain-answer"}}
 <div class="explain-answer">
   <div class="explain-title">

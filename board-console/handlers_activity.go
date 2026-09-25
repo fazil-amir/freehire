@@ -41,18 +41,13 @@ type cleanupCard struct {
 	LastStatus RunStatus // empty before the first real run
 	NextRun    time.Time
 	DueNow     bool
+	Paused     bool // switched off on the Schedules page
 }
 
 func buildCleanupCard(app *App) cleanupCard {
-	st := app.cleanup.State()
-	now := time.Now()
-	card := cleanupCard{NextRun: cleanupNext(st.LastRun, now), DueNow: cleanupDue(st.LastRun, now)}
-	// A LastRun with no status is the clock NewCleanupStore started on a
-	// fresh install, not a run — so there is nothing to show yet.
-	if st.LastStatus != "" {
-		card.LastRun, card.LastStatus = st.LastRun, st.LastStatus
-	}
-	return card
+	j := app.system.Get(sysCleanup)
+	now := time.Now().Round(0)
+	return cleanupCard{LastRun: j.LastRun, LastStatus: j.LastStatus, NextRun: j.NextRun(now), DueNow: j.Due(now), Paused: !j.Enabled}
 }
 
 // handleCleanup starts the dead-board cleanup: Preview (apply=false) or

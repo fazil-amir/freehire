@@ -38,7 +38,7 @@ func newTestSchedulerFor(t *testing.T, providers ...string) (*Scheduler, *Schedu
 	if err != nil {
 		t.Fatal(err)
 	}
-	cleanup, err := NewCleanupStore(filepath.Join(dir, "cleanup.json")) // fresh: not due
+	system, err := NewSystemStore(filepath.Join(dir, "system.json"), "") // fresh: not due
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func newTestSchedulerFor(t *testing.T, providers ...string) (*Scheduler, *Schedu
 		}
 	}
 	forceDue(store) // a new schedule first runs at its NEXT slot; tests want it now
-	runner := NewRunner(csv, activity, nil, cleanup, Binaries{Ingest: ingest, CSVPath: csvPath})
+	runner := NewRunner(csv, activity, nil, system, Binaries{Ingest: ingest, CSVPath: csvPath})
 	return NewScheduler(store, runner), store, activity
 }
 
@@ -186,4 +186,31 @@ func TestScheduler_QueuesRunsBeyondCapacity(t *testing.T) {
 		return s.LastStatus == "running" || s.LastStatus == "success"
 	})
 	waitFor(t, "every crawl to end", func() bool { return sched.runner.CrawlCount() == 0 })
+}
+
+// The company recount is a system job: when its daily slot is unserved the
+// scheduler starts it, and the run is recorded as its last.
+func TestScheduler_RunsTheDailyRecount(t *testing.T) {
+	sched, store, activity := newTestScheduler(t)
+	r := sched.runner
+	r.bin.RecountCompanies = writeScript(t, "true")
+	r.bin.ReindexCompanies = writeScript(t, "true")
+	store.mu.Lock()
+	store.schedules = nil // only the system jobs here
+	store.mu.Unlock()
+	r.system.mu.Lock()
+	r.system.jobs[sysRecount].Served = time.Time{} // its slot is unserved
+	r.system.mu.Unlock()
+
+	sched.runDue()
+	waitFor(t, "the recount to be recorded", func() bool { return r.system.Get(sysRecount).LastStatus == StatusDone })
+	if len(jobsOf(activity, "recount-companies")) != 1 {
+		t.Fatal("want one recount-companies run")
+	}
+	if r.system.Get(sysRecount).Due(time.Now()) {
+		t.Error("a recorded run must serve the slot")
+	}
+	if r.system.Get(sysCleanup).LastRun.IsZero() == false {
+		t.Error("the cleanup was not due and must not have run")
+	}
 }

@@ -7,3 +7,4 @@ board-console
 data/activity.jsonl
 data/schedule.json
 data/cleanup.json
+data/system.json

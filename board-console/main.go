@@ -25,7 +25,7 @@ type App struct {
 	activity  *ActivityLog
 	schedules *ScheduleStore
 	runner    *Runner
-	cleanup   *CleanupStore
+	system    *SystemStore
 	explainer *Explainer
 	sessions  *SessionStore
 	db        *DBStore // nil when DATABASE_URL is unset or the open failed — every reader falls back gracefully
@@ -73,12 +73,12 @@ func main() {
 		}
 	}
 
-	cleanupStore, err := NewCleanupStore(dataDir + "/cleanup.json")
+	systemStore, err := NewSystemStore(dataDir+"/system.json", dataDir+"/cleanup.json")
 	if err != nil {
-		log.Fatalf("load cleanup.json: %v", err)
+		log.Fatalf("load system.json: %v", err)
 	}
 
-	runner := NewRunner(csvStore, activity, dbStore, cleanupStore, binariesFromEnv())
+	runner := NewRunner(csvStore, activity, dbStore, systemStore, binariesFromEnv())
 	runner.OnCrawlFinished = scheduleStore.RecordProviderCrawl
 
 	scheduler := NewScheduler(scheduleStore, runner)
@@ -94,7 +94,7 @@ func main() {
 		activity:  activity,
 		schedules: scheduleStore,
 		runner:    runner,
-		cleanup:   cleanupStore,
+		system:    systemStore,
 		explainer: NewExplainerFromEnv(),
 		sessions:  NewSessionStore(),
 		db:        dbStore,
@@ -127,6 +127,9 @@ func main() {
 	mux.HandleFunc("POST /schedules/delete", requireAuth(app.sessions, handleScheduleDelete(app)))
 	mux.HandleFunc("POST /schedules/toggle", requireAuth(app.sessions, handleScheduleToggle(app)))
 
+	mux.HandleFunc("GET /schedules/run", requireAuth(app.sessions, handleScheduleRun(app)))
+	mux.HandleFunc("POST /system-jobs/toggle", requireAuth(app.sessions, handleSystemToggle(app)))
+	mux.HandleFunc("POST /system-jobs/time", requireAuth(app.sessions, handleSystemTime(app)))
 	mux.HandleFunc("GET /system/stats", requireAuth(app.sessions, handleSystemStats(app)))
 	mux.HandleFunc("POST /system/build-cache/prune", requireAuth(app.sessions, handleBuildCachePrune(app)))
 	mux.HandleFunc("GET /activity", requireAuth(app.sessions, handleActivity(app)))

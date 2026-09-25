@@ -89,9 +89,11 @@ dump gets read for).
 All of them live under `data/`, which is mounted as a volume in
 `docker-compose.yml` so they survive container rebuilds. Only
 `combined_boards.csv` is tracked in git — it is the shared board catalog.
-`activity.jsonl`, `schedule.json` and `cleanup.json` are **per machine** and
+`activity.jsonl`, `schedule.json` and `system.json` are **per machine** and
 git-ignored: each environment (a laptop, the VPS) keeps its own run
-history, schedules and cleanup clock, and a fresh clone starts them empty.
+history, schedules and system-job settings, and a fresh clone starts them
+empty. (`system.json` replaced `cleanup.json`, whose last run it takes over
+once on first start.)
 
 On a Linux host the container (uid 65532) must be able to write `data/`
 while your own user can still `git pull` the CSV. `make up` handles this:
@@ -283,6 +285,15 @@ and CSV/schedule management work regardless.
   apply). One delegated click listener (`app.js`) opens/closes every
   menu on the page — clicking a toggle opens its own menu and closes every
   other one; clicking anywhere else closes all of them.
+- **System jobs** are Board Console's own daily chores, listed after the
+  providers on the Schedules page under a "System" line: the **Dead-board
+  cleanup** (`close-chronic-boards --apply`, then reindex and recount) and
+  **Recount companies** (`recount-companies`, then `reindex-companies`).
+  Each has a toggle and a ⋮ menu to re-time it ("Change time…", 15-minute
+  grid, your timezone), run it now, or open its runs in Activity. They live in `data/system.json`; a run started by hand
+  counts as the day's run, and a re-timed or resumed job waits for its next
+  time rather than firing at once. Their squares on the timeline are round
+  and coloured by the last run; they never count toward the Load row.
 - **The sidebar's Server card** shows the host's disk, memory and CPU
   (from `/proc` and `statfs` — inside Docker these describe the host), polled
   every 5s from `GET /system/stats`, amber from 75% and red from 90%. The Disk

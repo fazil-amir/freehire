@@ -608,7 +608,8 @@ dialog.dialog-sm { width: 460px; }
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  padding: 24px 28px 0;
+  padding: 24px 28px 20px;
+  border-bottom: 1px solid var(--border);
 }
 dialog h2 { margin: 0; font-size: 18px; letter-spacing: -0.01em; }
 .dialog-subtitle { margin: 4px 0 0; font-size: 13px; color: var(--text-muted); }
@@ -663,7 +664,17 @@ dialog h2 { margin: 0; font-size: 18px; letter-spacing: -0.01em; }
   color: var(--text-faint);
   font-variant-numeric: tabular-nums;
 }
-.time-row select { width: 84px; height: 34px; background-color: var(--surface); }
+/* The value sits left, centred vertically: equal top and bottom padding
+   around one line of text fills the 34px box exactly. */
+.time-row select {
+  width: 84px;
+  height: 34px;
+  padding: 6px 26px 6px 12px;
+  line-height: 20px;
+  background-color: var(--surface);
+  background-position: right 8px center;
+}
+.time-row[data-state="invalid"] select { border-color: var(--danger); }
 .time-sep { color: var(--text-muted); font-weight: 600; }
 .time-note {
   margin-left: auto;
@@ -678,7 +689,8 @@ dialog h2 { margin: 0; font-size: 18px; letter-spacing: -0.01em; }
 .time-row[data-state="free"] .time-note { color: var(--success); background: var(--success-muted); }
 .time-row[data-state="busy"] .time-note { color: var(--accent); background: var(--accent-muted); }
 .time-row[data-state="booked"] .time-note,
-.time-row[data-state="dup"] .time-note { color: var(--danger); background: var(--danger-muted); }
+.time-row[data-state="dup"] .time-note,
+.time-row[data-state="invalid"] .time-note { color: var(--danger); background: var(--danger-muted); }
 .time-row[data-state="booked"] select { border-color: var(--danger); }
 .time-remove {
   flex: none;
@@ -800,72 +812,173 @@ code {
 .toast-error { border-left-color: var(--danger); }
 .toast-hide { opacity: 0; transform: translateY(4px); }
 
-/* --- schedules: the 24-hour plan (drawn by app.js drawTimeline) --- */
-.timeline-card { padding: 18px 20px 20px; margin-bottom: 20px; }
-.timeline-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
-.timeline-head h2 { margin: 0; font-size: 15px; }
-.timeline-toggle {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+/* --- schedules: the plan table (drawn by app.js drawPlan) --- */
+/* Its toolbar filters in the page, so its switches are buttons, styled
+   like the links the other toolbars use. */
+.segmented button, .tabs button {
   background: none;
   border: none;
-  color: var(--text);
   font: inherit;
-  padding: 0;
   cursor: pointer;
-  text-align: left;
 }
-.timeline-toggle .job-chevron { font-size: 18px; line-height: 1; margin-right: 0; color: var(--text-muted); }
-.timeline-summary { font-size: 12px; color: var(--text-muted); }
-.timeline-summary.over { color: var(--danger); }
-.timeline-card:not(.collapsed) .job-chevron { transform: rotate(90deg); color: var(--accent); }
-.timeline-card.collapsed .timeline,
-.timeline-card.collapsed .timeline-legend { display: none; }
-.timeline-card.collapsed .timeline-head { margin-bottom: 0; }
-.timeline-legend { display: flex; gap: 14px; font-size: 12px; color: var(--text-muted); }
-.timeline-legend span { display: inline-flex; align-items: center; gap: 6px; }
-.lg { width: 12px; height: 8px; border-radius: 3px; display: inline-block; }
-.lg-1 { background: var(--accent); opacity: 0.5; }
-.lg-2 { background: var(--accent); }
-.lg-over { background: var(--danger); }
-
-.timeline { position: relative; --tl-label: 150px; }
-.tl-row { display: flex; align-items: center; min-height: 32px; }
-.tl-row + .tl-row { border-top: 1px dashed var(--border); }
-.tl-label {
-  width: var(--tl-label);
-  flex-shrink: 0;
-  font-size: 14px; /* the tables' cell size */
-  color: var(--text);
-  padding-right: 12px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.segmented button {
+  color: var(--text-muted);
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
 }
-/* The load row is the plan's header: a subtle band, padded outward by
-   the same amount it is pulled out, so its track still lines up with the
-   rows below. */
-.tl-row.tl-load {
-  margin: 0 -10px 2px;
-  padding: 0 10px;
-  border-top: 0;
+.segmented button.active { background: var(--surface-raised); color: var(--text); box-shadow: var(--shadow-sm); }
+.segmented button:hover:not(.active) { color: var(--text); }
+.tabs button {
+  color: var(--text-muted);
+  padding: 7px 14px;
   border-radius: var(--radius-md);
-  background: var(--surface-raised);
+  font-size: 13px;
+  font-weight: 500;
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
 }
-.tl-load + .tl-row { border-top: 0; }
-.tl-load .tl-label { font-weight: 600; }
-/* Board Console's own daily job, noted under the plan: the timeline rows
-   are the providers only. */
-.tl-system {
+.tabs button.active { background: var(--accent-muted); color: var(--accent); }
+.tabs button:hover:not(.active) { background: var(--surface-raised); color: var(--text); }
+
+.plan-col-provider { width: 280px; }
+.plan-col-toggle { width: 100px; }
+.plan-col-actions { width: 60px; }
+
+/* Provider cell: the name, and under it how its last crawl went. */
+.plan-name { font-weight: 500; }
+.plan-last {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin: 12px 0 0;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+.plan-last .badge { font-size: 11px; padding: 1px 8px; }
+.tl-per { margin-left: 4px; color: var(--text-faint); font-size: 12px; font-weight: 400; }
+
+/* The timeline column. Its cells share one geometry — 12px of padding
+   either side, the track in between — so the hour gridlines (a background
+   on the content box) and the "now" line (--now on the table, a share of
+   the day) line up down the whole column, header included. */
+.plan-table .plan-cell {
+  position: relative;
+  padding-left: 12px;
+  padding-right: 12px;
+}
+.plan-table td.plan-cell,
+.plan-table tr.plan-load th.plan-cell {
+  padding-top: 0;
+  padding-bottom: 0;
+  background-origin: content-box;
+  background-clip: content-box;
+  background-image:
+    repeating-linear-gradient(to right, var(--border) 0 1px, transparent 1px calc(100% / 8)),
+    repeating-linear-gradient(to right, rgba(220, 217, 219, 0.035) 0 1px, transparent 1px calc(100% / 24));
+}
+.plan-now {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(12px + (100% - 24px) * var(--now, 0));
+  width: 2px;
+  background: var(--warning);
+  pointer-events: none;
+}
+.tl-track { position: relative; height: 32px; }
+.plan-scale { height: 18px; container-type: inline-size; }
+.tl-tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--text-faint);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.tl-tick.minor { opacity: 0.6; }
+/* Below ~45px an hour, "00:00" no longer fits its column: keep every
+   third label only. */
+@container (max-width: 1080px) { .tl-tick.minor { display: none; } }
+
+/* The header is two rows: the hour scale, then Load — the plan's sum,
+   read like a header rather than a provider. One rule under both. */
+.plan-table thead tr:first-child th { border-bottom: none; padding-bottom: 6px; }
+.plan-table thead tr.plan-load th {
+  padding-top: 0;
+  padding-bottom: 0;
+  border-bottom: 1px solid var(--border-strong);
+  background-color: rgba(220, 217, 219, 0.025);
+}
+.plan-table thead tr.plan-load .tl-track { height: 30px; }
+
+/* Run and load blocks are squares centred on their start time: the width
+   (set by app.js) is one 15-minute slot's, the height follows it, capped
+   so a wide screen does not outgrow the row. */
+.tl-block,
+.tl-slot {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  max-width: 22px;
+  aspect-ratio: 1;
+  border-radius: 5px;
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--surface);
+}
+/* app.js lowers a load slot's opacity when fewer crawls than the capacity
+   start there, so it deepens as it fills; past it, red. */
+.tl-slot.over { background: var(--danger); }
+/* A run, by how its latest occurrence went. */
+.tl-block.run-success { background: var(--success); }
+.tl-block.run-partial { background: var(--warning); }
+.tl-block.run-failed { background: var(--danger); }
+.tl-block.run-running { background: var(--accent); animation: run-pulse 1.4s ease-in-out infinite; }
+.tl-block.run-pending { background: var(--accent); }
+.tl-block.run-none { background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--text-faint), 0 0 0 1px var(--surface); }
+@keyframes run-pulse { 50% { opacity: 0.45; } }
+/* A square with a run opens its log; the one open is outlined. */
+.tl-block[data-run] { cursor: pointer; }
+.tl-block[data-run]:hover { filter: brightness(1.15); }
+.tl-block.selected { outline: 2px solid var(--text); outline-offset: 2px; }
+/* The provider's next run: ringed. */
+.tl-block.next { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--text); }
+.tl-block.run-none.next { box-shadow: inset 0 0 0 1.5px var(--text-faint), 0 0 0 2px var(--surface), 0 0 0 3.5px var(--text); }
+/* A paused schedule: dimmed, its runs hollow. */
+.plan-table tr.paused > td:not(.col-toggle):not(.col-actions) { opacity: 0.55; }
+.plan-table tr.paused .tl-block { background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--accent); animation: none; }
+
+/* Board Console's own daily jobs, after the providers: a group line
+   naming them, round squares, and a gear by the name. */
+.plan-table tbody.plan-system tr.plan-group td {
+  padding-top: 10px;
+  padding-bottom: 10px;
+  border-top: 1px solid var(--border-strong);
   font-size: 12px;
   color: var(--text-muted);
 }
-.timeline-card.collapsed .tl-system { display: none; }
+.plan-group-note { margin-left: 10px; }
+.sys-icon { margin-right: 8px; color: var(--pill-cleanup); }
+.tl-block.sys { border-radius: 50%; }
+
+/* Under the table: the summary and the legend. */
+.plan-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border);
+}
+.plan-foot-start { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 20px; }
+.plan-summary { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.plan-summary.over { color: var(--danger); }
 .tl-tag {
   padding: 1px 6px;
   border-radius: 999px;
@@ -876,79 +989,26 @@ code {
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
-.tl-per { margin-left: 6px; color: var(--text-faint); font-size: 12px; }
-.tl-track { position: relative; flex: 1; height: 32px; }
-.tl-row.tl-scale { min-height: 26px; }
-.tl-scale .tl-track { height: 18px; container-type: inline-size; }
-.tl-tick {
-  position: absolute;
-  top: 0;
-  transform: translateX(-50%);
-  font-size: 11px;
+.timeline-legend { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; font-size: 12px; color: var(--text-muted); }
+.timeline-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.timeline-legend .legend-group {
+  margin-left: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--text-faint);
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
 }
-.tl-tick.minor { opacity: 0.6; }
-/* Below ~45px an hour, "00:00" no longer fits its column: keep every
-   third label only. */
-@container (max-width: 1080px) { .tl-tick.minor { display: none; } }
-/* Run and load blocks are squares centred on their start time: the width
-   (set by app.js) is one 15-minute slot's, the height follows it, capped
-   so a wide screen does not outgrow the row. */
-.tl-block,
-.tl-slot {
-  position: absolute;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  max-width: 24px;
-  aspect-ratio: 1;
-  border-radius: 5px;
-  background: var(--accent);
-  box-shadow: 0 0 0 1px var(--surface);
-}
-/* app.js lowers a load slot's opacity when fewer crawls than the capacity
-   start there, so it deepens as it fills; past it, red. */
-.tl-slot.over { background: var(--danger); }
-/* Vertical lines at every hour, under the scale and across every
-   row, aligned with the tracks (which start after the label column). */
-.tl-grid {
-  position: absolute;
-  top: 26px; /* under the scale row (.tl-row.tl-scale's height) */
-  bottom: 0;
-  left: var(--tl-label);
-  right: 0;
-  pointer-events: none;
-}
-.tl-gridline { position: absolute; top: 0; bottom: 0; border-left: 1px dashed rgba(220, 217, 219, 0.05); }
-.tl-gridline.major { border-left-color: var(--border); }
-.tl-now {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: calc(var(--tl-label) + (100% - var(--tl-label)) * var(--now));
-  width: 2px;
-  background: var(--warning);
-  border-radius: 2px;
-  pointer-events: none;
-}
-.tl-empty { margin: 10px 0 0; font-size: 13px; }
-/* The Times cell keeps the row's height: chips stay on one line and the
-   cell scrolls sideways when a schedule has more than fit. */
-.slot-times {
-  display: flex;
-  gap: 4px;
-  overflow-x: auto;
-  font-variant-numeric: tabular-nums;
-  scrollbar-width: thin;
-}
-.time-chip {
-  flex: none;
-  padding: 2px 8px;
-  border-radius: var(--radius-md);
-  background: var(--surface-raised);
-  font-size: 12px;
-}
+.timeline-legend .legend-group:first-child { margin-left: 0; }
+.lg { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.lg-success { background: var(--success); }
+.lg-partial { background: var(--warning); }
+.lg-failed { background: var(--danger); }
+.lg-none { box-shadow: inset 0 0 0 1.5px var(--text-faint); }
+.lg-next { background: var(--accent); box-shadow: 0 0 0 1.5px var(--surface), 0 0 0 3px var(--text); }
+.lg-1 { background: var(--accent); opacity: 0.5; }
+.lg-2 { background: var(--accent); }
+.lg-over { background: var(--danger); }
 
 /* --- schedules --- */
 .interval-row { display: flex; gap: 8px; }

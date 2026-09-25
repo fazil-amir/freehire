@@ -88,9 +88,12 @@ function refreshLiveRegion() {
 // clicks on the row's own controls (a toggle, a kebab) are theirs, not this.
 document.addEventListener("click", function (e) {
   var row = e.target.closest(".run-row");
-  if (!row || e.target.closest("button, a, form, input, select")) return;
+  // A timeline square with a run opens that run instead (showSlotLog).
+  if (!row || e.target.closest("button, a, form, input, select, .tl-block[data-run]")) return;
   var detail = document.getElementById("detail-" + row.dataset.runId);
-  if (detail) detail.hidden = !detail.hidden;
+  if (!detail) return;
+  resetSlotLog(detail);
+  detail.hidden = !detail.hidden;
 });
 
 // Click a .job-row (Activity) to show or hide its steps. Closing a job also
@@ -282,28 +285,18 @@ function localizeTimes() {
 localizeTimes();
 document.addEventListener("liveregion:refreshed", localizeTimes);
 
-// A schedule's planned times (Schedules table): chips ordered from the
-// viewer's midnight.
-function tidySlotTimes() {
-  document.querySelectorAll(".slot-times").forEach(function (cell) {
-    var times = Array.prototype.slice.call(cell.querySelectorAll("time"));
-    function localMin(t) { var d = new Date(t.getAttribute("datetime")); return d.getHours() * 60 + d.getMinutes(); }
-    times.sort(function (a, b) { return localMin(a) - localMin(b); });
-    times.forEach(function (t) { cell.appendChild(t); });
-  });
-}
-tidySlotTimes();
-document.addEventListener("liveregion:refreshed", tidySlotTimes);
-
-// The Schedules page's 24-hour plan, drawn from #timeline-data (built by
-// buildTimeline in handlers_schedules.go). Everything arrives in minutes
-// after 00:00 UTC; it is shifted here into the viewer's timezone, so the
-// day runs from the viewer's midnight to midnight. Blocks that cross
-// midnight are split in two.
-function drawTimeline() {
-  var host = document.getElementById("timeline");
+// The Schedules plan (templates/schedules.html): one table whose rows are
+// the providers, each run drawn on its row's 24-hour track in the viewer's
+// timezone from the row's slots (slotRuns in handlers_schedules.go:
+// minutes after 00:00 UTC, each with how its latest run went — coloured
+// here). The Load row comes from #timeline-data. The system jobs' rows
+// (their own tbody) are drawn the same way but never sorted or counted. Every mark sits on the moment it stands for — an
+// hour label on its gridline, a run's square centred on its start, the
+// "now" line — and rows are ordered by their first run of the viewer's day.
+function drawPlan() {
+  var table = document.querySelector("[data-plan]");
   var src = document.getElementById("timeline-data");
-  if (!host || !src) return;
+  if (!table || !src) return;
   var data;
   try { data = JSON.parse(src.textContent); } catch (e) { return; }
   var DAY = 1440;
@@ -311,117 +304,224 @@ function drawTimeline() {
   function local(min) { return ((min + shift) % DAY + DAY) % DAY; }
   function pct(min) { return (min / DAY * 100) + "%"; }
   function el(tag, cls, parent) { var e = document.createElement(tag); if (cls) e.className = cls; if (parent) parent.appendChild(e); return e; }
-  function block(track, startUTC, minutes, cls, label) { // minutes: every run is one 15-minute block
-    var s = local(startUTC), parts = s + minutes > DAY ? [[s, DAY - s], [0, s + minutes - DAY]] : [[s, minutes]];
-    return parts.map(function (p) {
-      var b = el("div", cls, track);
-      // Centred on its START time — the moment it runs, like the hour
-      // labels and the "now" line — and a full slot wide; a ring in the
-      // card's colour (CSS) keeps back-to-back runs (00:00, 00:15) apart.
-      b.style.left = pct(p[0]);
-      b.style.width = "max(6px, " + pct(p[1]) + ")";
-      if (label) b.title = label;
-      return b;
-    });
-  }
   function hhmm(min) { var m = local(min); return String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0"); }
-
-  host.replaceChildren();
-  // Hour gridlines, drawn first so every block paints over them.
-  var grid = el("div", "tl-grid", host);
-  // One per hour; the 3-hourly ones a touch stronger.
-  for (var g = 0; g <= 24; g++) {
-    el("span", g % 3 ? "tl-gridline" : "tl-gridline major", grid).style.left = pct(g * 60);
+  // A run's square: centred on its start, one 15-minute slot wide (CSS caps
+  // it and keeps it square).
+  function square(track, startUTC, cls, label) {
+    var b = el("div", cls, track);
+    b.style.left = pct(local(startUTC));
+    b.style.width = "max(6px, " + pct(15) + ")";
+    b.title = label;
+    return b;
   }
-  // Hour scale.
-  var scale = el("div", "tl-row tl-scale", host);
-  el("div", "tl-label", scale);
-  var ticks = el("div", "tl-track", scale);
-  // Each hour's label sits on its gridline, over the runs that start then;
-  // the ones between the 3-hourly labels hide on a narrow screen.
+  function slots(track) { try { return JSON.parse(track.dataset.slots || "[]"); } catch (e) { return []; } }
+  function times(track) { return slots(track).map(function (x) { return x.m; }); }
+  var STATUS = { success: "success", partial: "partial", failed: "failed", running: "running", pending: "not run yet", none: "no run" };
+  function ago(iso) {
+    var mins = Math.round((Date.now() - new Date(iso)) / 60000);
+    return mins < 60 ? mins + " min ago" : Math.round(mins / 60) + " h ago";
+  }
+
+  // Hour labels in the header, each on its hour; the ones between the
+  // 3-hourly labels hide on a narrow screen.
+  var scale = table.querySelector("[data-plan-scale]");
+  scale.replaceChildren();
   for (var h = 0; h < 24; h++) {
-    var t = el("span", h % 3 ? "tl-tick minor" : "tl-tick", ticks);
+    var t = el("span", h % 3 ? "tl-tick minor" : "tl-tick", scale);
     t.style.left = pct(h * 60);
     t.textContent = String(h).padStart(2, "0") + ":00";
   }
-  // Load strip: how many planned crawls start in each 15-minute slot, one
-  // block per slot, shading from light (one crawl) to full (booked) and red
-  // past the capacity.
-  var loadRow = el("div", "tl-row tl-load", host);
-  el("div", "tl-label", loadRow).textContent = "Load";
-  var loadTrack = el("div", "tl-track", loadRow);
-  (data.load || []).forEach(function (n, i) {
-    if (!n) return;
-    var cls = n > data.capacity ? "tl-slot over" : "tl-slot";
-    block(loadTrack, i * 15, 15, cls, n + " crawl" + (n > 1 ? "s" : "") + " at " + hhmm(i * 15) +
-      (n > data.capacity ? " — " + (n - data.capacity) + " will queue" : n >= data.capacity ? " — booked" : ""))
-      .forEach(function (b) { if (n < data.capacity) b.style.opacity = String(0.35 + 0.65 * n / data.capacity); });
-  });
-  // One bar per schedule, ordered by its first run of the viewer's day.
-  function firstLocal(r) { return Math.min.apply(null, r.starts.map(local)); }
-  var rows = (data.rows || []).slice().sort(function (a, b) { return firstLocal(a) - firstLocal(b) || (a.provider < b.provider ? -1 : 1); });
-  rows.forEach(function (r) {
-    var row = el("div", "tl-row", host);
-    var lab = el("div", "tl-label", row);
-    lab.textContent = r.provider;
-    el("span", "tl-per", lab).textContent = r.starts.length + "×";
-    var track = el("div", "tl-track", row);
-    r.starts.forEach(function (st) {
-      block(track, st, 15, "tl-block", r.provider + " · " + hhmm(st));
+
+  // Load: how many planned crawls start in each slot, shading from light
+  // (one crawl) to full (booked), red past the capacity.
+  var loadTrack = table.querySelector("[data-plan-load]");
+  if (loadTrack) {
+    loadTrack.replaceChildren();
+    (data.load || []).forEach(function (n, i) {
+      if (!n) return;
+      var b = square(loadTrack, i * 15, n > data.capacity ? "tl-slot over" : "tl-slot",
+        n + " crawl" + (n > 1 ? "s" : "") + " at " + hhmm(i * 15) +
+        (n > data.capacity ? " — " + (n - data.capacity) + " will queue" : n >= data.capacity ? " — booked" : ""));
+      if (n < data.capacity) b.style.opacity = String(0.35 + 0.65 * n / data.capacity);
     });
-  });
-  if (!(data.rows || []).length) {
-    el("p", "muted tl-empty", host).textContent = "No schedules yet — add one and it will be placed here.";
   }
-  // Board Console's own daily job is not a provider row: it is noted under
-  // the plan instead.
-  var sys = host.parentNode.querySelector("[data-timeline-system]");
-  if (sys) sys.textContent = "Dead-board cleanup runs daily at " + hhmm(data.cleanupMin) + ".";
-  // "Now" line across every row.
-  // The one-line summary shown beside the title (and alone when collapsed).
-  var card = host.closest(".timeline-card");
-  var perDay = (data.rows || []).reduce(function (n, r) { return n + r.starts.length; }, 0);
+
+  // Each provider's runs, coloured by how each one last went; the next
+  // one is ringed.
+  function drawRuns(track, cls) {
+    track.replaceChildren();
+    var next = track.dataset.next ? new Date(track.dataset.next) : null;
+    var nextUTC = next ? next.getUTCHours() * 60 + next.getUTCMinutes() : -1;
+    slots(track).forEach(function (x) {
+      var isNext = x.m === nextUTC;
+      var label = track.dataset.provider + " · " + hhmm(x.m) + " — last run: " + STATUS[x.s] +
+        (x.at ? " (" + ago(x.at) + ")" : "") + (x.sum ? " · " + x.sum : "") + (isNext ? "\nNext run" : "");
+      var b = square(track, x.m, cls + " run-" + x.s + (isNext ? " next" : ""), label + (x.run ? "\nClick for its log" : ""));
+      if (x.run) b.dataset.run = x.run;
+    });
+  }
+  var tracks = Array.prototype.slice.call(table.querySelectorAll("[data-plan-track]"));
+  var enabled = 0, perDay = 0;
+  tracks.forEach(function (track) {
+    drawRuns(track, "tl-block");
+    if (track.hasAttribute("data-enabled")) { enabled++; perDay += times(track).length; }
+  });
+  table.querySelectorAll("[data-system-track]").forEach(function (track) { drawRuns(track, "tl-block sys"); });
+
+  // Rows by their first run of the viewer's day; each keeps its log row.
+  var body = table.tBodies[0];
+  function firstLocal(track) { return Math.min.apply(null, times(track).map(local).concat([DAY])); }
+  tracks.slice().sort(function (a, b) {
+    return firstLocal(a) - firstLocal(b) || (a.dataset.provider < b.dataset.provider ? -1 : 1);
+  }).forEach(function (track) {
+    var row = track.closest("tr");
+    var detail = document.getElementById("detail-" + row.dataset.runId);
+    body.appendChild(row);
+    if (detail) body.appendChild(detail);
+  });
+  var nomatch = body.querySelector(".plan-nomatch");
+  if (nomatch) body.appendChild(nomatch);
+
+  // "Now", as a share of the day: every timeline cell draws its line there.
+  var now = new Date();
+  table.style.setProperty("--now", String((now.getHours() * 60 + now.getMinutes()) / DAY));
+
   var peak = Math.max.apply(null, (data.load || [0]).concat([0]));
-  var summary = card && card.querySelector(".timeline-summary");
+  var summary = table.parentNode.querySelector("[data-plan-summary]");
+  applyPlanFilters();
   if (summary) {
-    summary.textContent = (data.rows || []).length + " schedule" + ((data.rows || []).length === 1 ? "" : "s") +
-      " · " + perDay + " crawls a day · busiest slot " + peak + " of " + data.capacity;
+    summary.textContent = enabled + " schedule" + (enabled === 1 ? "" : "s") + " · " + perDay +
+      " crawls a day · busiest slot " + peak + " of " + data.capacity;
     summary.classList.toggle("over", peak > data.capacity);
   }
-  applyTimelineCollapsed(card);
+}
+// The plan's toolbar: Enabled/Paused, the last run's result and a provider
+// search, applied in the page (every schedule is already on it) and kept in
+// the URL, so a reload or a shared link shows the same view.
+var planFilter = { state: "", status: "", q: "" };
+(function () {
+  var bar = document.querySelector("[data-plan-filters]");
+  if (!bar) return;
+  var params = new URLSearchParams(window.location.search);
+  planFilter = { state: params.get("state") || "", status: params.get("status") || "", q: params.get("q") || "" };
+  var search = bar.querySelector("[data-plan-search]");
+  search.value = planFilter.q;
+  function mark() {
+    bar.querySelectorAll("[data-plan-state]").forEach(function (b) { b.classList.toggle("active", b.dataset.planState === planFilter.state); });
+    bar.querySelectorAll("[data-plan-status]").forEach(function (b) { b.classList.toggle("active", b.dataset.planStatus === planFilter.status); });
+  }
+  function commit() {
+    var p = new URLSearchParams();
+    if (planFilter.state) p.set("state", planFilter.state);
+    if (planFilter.status) p.set("status", planFilter.status);
+    if (planFilter.q) p.set("q", planFilter.q);
+    var qs = p.toString();
+    history.replaceState(null, "", window.location.pathname + (qs ? "?" + qs : ""));
+    mark();
+    applyPlanFilters();
+  }
+  bar.addEventListener("click", function (e) {
+    var b = e.target.closest("[data-plan-state], [data-plan-status]");
+    if (!b) return;
+    if (b.hasAttribute("data-plan-state")) planFilter.state = b.dataset.planState;
+    else planFilter.status = b.dataset.planStatus;
+    commit();
+  });
+  search.addEventListener("input", function () { planFilter.q = search.value.trim(); commit(); });
+  mark();
+})();
 
-  var now = new Date();
-  var nowLine = el("div", "tl-now", host);
-  nowLine.style.setProperty("--now", String((now.getHours() * 60 + now.getMinutes()) / DAY));
-  nowLine.title = "now";
+function applyPlanFilters() {
+  var table = document.querySelector("[data-plan]");
+  if (!table) return;
+  var q = planFilter.q.toLowerCase(), shown = 0, any = false, systemShown = 0;
+  table.querySelectorAll("[data-plan-track], [data-system-track]").forEach(function (track) {
+    var system = track.hasAttribute("data-system-track");
+    if (!system) any = true;
+    var row = track.closest("tr");
+    var ok = (!q || track.dataset.provider.toLowerCase().indexOf(q) !== -1) &&
+      (!planFilter.state || (planFilter.state === "enabled") === track.hasAttribute("data-enabled")) &&
+      (!planFilter.status || track.dataset.last === planFilter.status);
+    row.hidden = !ok;
+    if (system) { if (ok) systemShown++; return; }
+    var detail = document.getElementById("detail-" + row.dataset.runId);
+    if (!ok && detail) detail.hidden = true; // a hidden row takes its open log with it
+    if (ok) shown++;
+  });
+  var group = table.querySelector(".plan-group");
+  if (group) group.hidden = systemShown === 0;
+  var nomatch = table.querySelector(".plan-nomatch");
+  if (nomatch) nomatch.hidden = !any || shown > 0;
 }
-// The timeline card folds to its header line; the choice is remembered in
-// this browser only (a convenience — storage may be unavailable, and then
-// it simply starts expanded).
-var TIMELINE_KEY = "boardconsole.timelineCollapsed";
-function timelineCollapsed() {
-  try { return localStorage.getItem(TIMELINE_KEY) === "1"; } catch (e) { return false; }
+
+drawPlan();
+document.addEventListener("liveregion:refreshed", drawPlan);
+
+// Click a square on the plan: the run that served that time opens under its
+// row, in place of the row's latest log (fetched from /schedules/run, the
+// same "run-log" fragment). Clicking the same square again closes it;
+// clicking the row goes back to its latest log. What is open is kept
+// through the page's live refreshes.
+var slotShown = {}; // detail row id → run id shown in it
+function resetSlotLog(detail) {
+  delete slotShown[detail.id];
+  var slot = detail.querySelector("[data-slot-log]"), latest = detail.querySelector("[data-latest-log]");
+  if (slot) { slot.hidden = true; slot.replaceChildren(); }
+  if (latest) latest.hidden = false;
+  markSlot(detail, null);
 }
-function applyTimelineCollapsed(card) {
-  if (!card) return;
-  var collapsed = timelineCollapsed();
-  card.classList.toggle("collapsed", collapsed);
-  var btn = card.querySelector("[data-timeline-toggle]");
-  if (btn) btn.setAttribute("aria-expanded", String(!collapsed));
+function markSlot(detail, runId) {
+  var row = detail.previousElementSibling;
+  if (!row) return;
+  row.querySelectorAll(".tl-block.selected").forEach(function (b) { b.classList.remove("selected"); });
+  if (runId) row.querySelectorAll('.tl-block[data-run="' + runId + '"]').forEach(function (b) { b.classList.add("selected"); });
+}
+function showSlotLog(detail, runId) {
+  var slot = detail.querySelector("[data-slot-log]"), latest = detail.querySelector("[data-latest-log]");
+  if (!slot) return;
+  fetch("/schedules/run?id=" + encodeURIComponent(runId), { headers: { "X-Board-Console-Fetch": "1" } })
+    .then(function (r) {
+      if (r.status === 401) window.location.href = "/login";
+      return r.text().then(function (t) { if (!r.ok) throw new Error(t || "Could not load this run."); return t; });
+    })
+    .then(function (html) {
+      slot.innerHTML = html;
+      slot.hidden = false;
+      if (latest) latest.hidden = true;
+      detail.hidden = false;
+      slotShown[detail.id] = runId;
+      markSlot(detail, runId);
+      localizeTimes();
+    })
+    .catch(function (err) { toast(err.message.trim(), true); });
 }
 document.addEventListener("click", function (e) {
-  var btn = e.target.closest("[data-timeline-toggle]");
-  if (!btn) return;
-  try { localStorage.setItem(TIMELINE_KEY, timelineCollapsed() ? "0" : "1"); } catch (err) { /* no storage: this page only */ }
-  var card = btn.closest(".timeline-card");
-  if (card) {
-    var collapsed = !card.classList.contains("collapsed");
-    card.classList.toggle("collapsed", collapsed);
-    btn.setAttribute("aria-expanded", String(!collapsed));
+  var sq = e.target.closest(".tl-block[data-run]");
+  if (!sq) return;
+  var row = sq.closest(".run-row");
+  var detail = row && document.getElementById("detail-" + row.dataset.runId);
+  if (!detail) return;
+  if (!detail.hidden && slotShown[detail.id] === sq.dataset.run) {
+    detail.hidden = true;
+    resetSlotLog(detail);
+    return;
   }
+  showSlotLog(detail, sq.dataset.run);
 });
-drawTimeline();
-document.addEventListener("liveregion:refreshed", drawTimeline);
+document.addEventListener("liveregion:refreshed", function () {
+  Object.keys(slotShown).forEach(function (id) {
+    var detail = document.getElementById(id);
+    if (detail) showSlotLog(detail, slotShown[id]);
+    else delete slotShown[id];
+  });
+});
+// Keep the "now" line moving between refreshes.
+setInterval(function () {
+  var table = document.querySelector("[data-plan]");
+  if (!table) return;
+  var now = new Date();
+  table.style.setProperty("--now", String((now.getHours() * 60 + now.getMinutes()) / 1440));
+}, 60000);
 
 // Real-time catalog search: every keystroke (debounced) fetches the
 // results fragment and swaps it in place — no reload, no Search button.
@@ -662,6 +762,7 @@ function openScheduleModal(provider, existing) {
 
   form.elements["id"].value = existing ? existing.id : "";
   providerSelect.value = provider || "";
+  delete dialog.dataset.checked; // no row is called out until a save is tried
   setTimeRows(dialog, existing ? existing.times : []);
   // Remembered so the booked check leaves this schedule's own runs out.
   dialog.dataset.editTimes = existing ? existing.times.join(",") : "";
@@ -724,6 +825,12 @@ function rowLocalMin(row) {
   return h === "" || m === "" ? -1 : Number(h) * 60 + Number(m);
 }
 
+// A row with one half chosen and the other not — the one case a save
+// refuses, since a fully empty row is just an unused one.
+function rowHalfFilled(row) {
+  return (row.querySelector('[name="hour"]').value === "") !== (row.querySelector('[name="minute"]').value === "");
+}
+
 // The day's crawls-starting-per-slot, as /schedules/load returned it when
 // the modal last opened; null until it arrives.
 var scheduleLoad = null;
@@ -731,7 +838,9 @@ var scheduleLoad = null;
 // Per row, how taken its slot already is (this schedule's own runs left
 // out): free, some of the capacity, or booked — only a warning, saving is
 // still allowed and the crawl queues. A repeated time is flagged; the
-// server keeps it once.
+// server keeps it once. Nothing here blocks: rows can be added freely, an
+// empty one is simply ignored on save, and a half-filled one (hour but no
+// minutes, or the reverse) is only called out once a save is attempted.
 function updateTimeRows(dialog) {
   var rows = Array.prototype.slice.call(dialog.querySelectorAll(".time-row"));
   var load = scheduleLoad ? (scheduleLoad.load || []).slice() : null;
@@ -748,8 +857,10 @@ function updateTimeRows(dialog) {
     var m = rowLocalMin(row), msg = "", state = "";
     row.querySelector(".time-index").textContent = String(i + 1);
     if (m < 0) {
-      msg = "pick a time";
-      state = "empty";
+      if (dialog.dataset.checked && rowHalfFilled(row)) {
+        msg = row.querySelector('[name="hour"]').value === "" ? "pick the hour" : "pick the minutes";
+        state = "invalid";
+      }
     } else if (seen[m]) {
       msg = "same time twice";
       state = "dup";
@@ -802,13 +913,9 @@ function showScheduleError(dialog, message) {
     if (existing) openScheduleModal(providerSelect.value, existing);
   });
 
-  // "+ Add another time" adds a row — or, while one is still empty, takes
-  // you to that one instead of stacking blanks.
+  // "+ Add another time" always adds a row, however many are unfilled.
   dialog.querySelector("[data-add-time]").addEventListener("click", function () {
-    var empty = Array.prototype.find.call(dialog.querySelectorAll(".time-row"), function (r) { return rowLocalMin(r) < 0; });
-    var row = empty || addTimeRow(dialog, -1);
-    var pick = row.querySelector('[name="hour"]').value === "" ? "hour" : "minute";
-    row.querySelector('[name="' + pick + '"]').focus();
+    addTimeRow(dialog, -1).querySelector('[name="hour"]').focus();
     updateTimeRows(dialog);
   });
   dialog.addEventListener("click", function (e) {
@@ -839,9 +946,18 @@ function showScheduleError(dialog, message) {
     } else {
       setFieldError(providerSelect, "");
     }
-    var filled = Array.prototype.some.call(dialog.querySelectorAll(".time-row"), function (r) { return rowLocalMin(r) >= 0; });
-    showScheduleError(dialog, filled ? "" : "Add at least one run time.");
-    if (!ok || !filled) return;
+    // Validation happens here, at the end: a half-filled row is named, an
+    // empty one is ignored, and at least one time must be set.
+    var rows = Array.prototype.slice.call(dialog.querySelectorAll(".time-row"));
+    var half = [];
+    rows.forEach(function (r, i) { if (rowHalfFilled(r)) half.push(i + 1); });
+    var filled = rows.some(function (r) { return rowLocalMin(r) >= 0; });
+    dialog.dataset.checked = "1";
+    updateTimeRows(dialog);
+    var msg = half.length ? (half.length === 1 ? "Time " + half[0] + " is" : "Times " + half.join(", ") + " are") +
+        " missing the hour or the minutes." : filled ? "" : "Add at least one run time.";
+    showScheduleError(dialog, msg);
+    if (!ok || msg) return;
 
     form.elements["tz_offset"].value = String(tzShift());
     var provider = providerSelect.value;
@@ -849,6 +965,45 @@ function showScheduleError(dialog, message) {
       .then(function () {
         dialog.close();
         toast("Schedule saved for " + provider);
+        return refreshLiveRegion();
+      })
+      .catch(function (err) { showScheduleError(dialog, err.message); });
+  });
+})();
+
+// "Change time…" on a system job's row: the re-time dialog
+// (templates/schedules.html) with its one hour/minute row in the viewer's
+// timezone, saved in the background like a schedule.
+(function () {
+  var dialog = document.getElementById("system-time-dialog");
+  if (!dialog) return;
+  var form = dialog.querySelector("form");
+  document.addEventListener("click", function (e) {
+    var trigger = e.target.closest("[data-system-time]");
+    if (!trigger) return;
+    var local = toLocalMin(Number(trigger.dataset.minute));
+    form.elements["key"].value = trigger.dataset.key;
+    form.elements["hour"].value = String(Math.floor(local / 60));
+    form.elements["minute"].value = String(local % 60);
+    dialog.querySelector("[data-system-title]").textContent = "Change time — " + trigger.dataset.name;
+    var zone = "";
+    try { zone = new Intl.DateTimeFormat(undefined, { timeZoneName: "short" }).formatToParts(new Date()).find(function (p) { return p.type === "timeZoneName"; }).value; } catch (err) { /* just "your timezone" */ }
+    dialog.querySelector("[data-system-zone]").textContent = zone ? "time in " + zone : "in your timezone";
+    dialog.querySelector("[data-remove-time]").hidden = true;
+    showScheduleError(dialog, "");
+    dialog.showModal();
+  });
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    if (form.elements["hour"].value === "" || form.elements["minute"].value === "") {
+      showScheduleError(dialog, "Pick the hour and the minutes.");
+      return;
+    }
+    form.elements["tz_offset"].value = String(tzShift());
+    postForm(form)
+      .then(function () {
+        dialog.close();
+        toast("Time saved");
         return refreshLiveRegion();
       })
       .catch(function (err) { showScheduleError(dialog, err.message); });

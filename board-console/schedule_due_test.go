@@ -162,3 +162,39 @@ func TestScheduleStore_EmptyFileIsNoSchedules(t *testing.T) {
 		t.Fatalf("an empty schedule.json must load as no schedules, got %v, %v", store, err)
 	}
 }
+
+// Each slot shows the crawl that served its latest occurrence: one started
+// from 15 minutes before it until the next slot, whoever started it.
+func TestSlotRuns_MatchTheCrawlThatServedEachTime(t *testing.T) {
+	s := Schedule{Provider: "acme", Times: []int{120, 600, 840}, Enabled: true} // 02:00, 10:00, 14:00 UTC
+	now := day(12, 0)
+	// A job as buildJobs makes it: its main step is its ingest run.
+	job := func(id int, at time.Time, status string) *Job {
+		return &Job{Kind: "Crawl", StartedAt: at, Status: status,
+			Steps: []*JobStep{{Run: &Run{ID: id, Action: "ingest", StartedAt: at}}}}
+	}
+	crawls := []*Job{
+		job(1, day(1, 50), OutcomeSuccess),             // a manual crawl just before 02:00 covers it
+		job(2, day(10, 1), OutcomeFailed),              // the 10:00 run
+		job(3, day(10, 30), OutcomeSuccess),            // a later one in the same window: not the slot's
+		job(4, day(0, 0).Add(-9*time.Hour), "running"), // yesterday 15:00: inside yesterday 14:00's window
+	}
+	got := slotRuns(s, crawls, now)
+	want := []string{OutcomeSuccess, OutcomeFailed, "running"} // 14:00 today is ahead, so yesterday's 14:00 counts
+	wantRun := []int{1, 2, 4}                                  // the run a click on each square opens
+	for i, w := range want {
+		if got[i].Status != w || got[i].Run != wantRun[i] {
+			t.Errorf("slot %d (%d): %q run %d, want %q run %d", i, got[i].Min, got[i].Status, got[i].Run, w, wantRun[i])
+		}
+	}
+
+	// Inside its window with nothing started yet: pending; past it: none.
+	got = slotRuns(Schedule{Times: []int{690}, Enabled: true}, nil, now) // 11:30, window runs to 11:30 tomorrow
+	if got[0].Status != "pending" {
+		t.Errorf("an open window with no crawl = %q, want pending", got[0].Status)
+	}
+	got = slotRuns(Schedule{Times: []int{600, 660}, Enabled: true}, nil, now) // 10:00 window closed at 11:00
+	if got[0].Status != "none" || got[1].Status != "pending" {
+		t.Errorf("got %q/%q, want none/pending", got[0].Status, got[1].Status)
+	}
+}

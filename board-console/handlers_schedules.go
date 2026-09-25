@@ -32,6 +32,67 @@ type scheduleRow struct {
 	// Queued: the schedule is due but SCHEDULE_CAPACITY crawls are already
 	// running, so it waits for one to end.
 	Queued bool
+	// Slots is each of the day's runs with how its most recent run went, as
+	// JSON for app.js to colour the row's squares (see slotRuns).
+	Slots string
+}
+
+// slotRun is one planned run on a Schedules row: its time of day and how
+// its most recent occurrence (within the last 24 hours) went.
+type slotRun struct {
+	Min     int       `json:"m"`             // minutes after 00:00 UTC
+	Status  string    `json:"s"`             // success / partial / failed / running, "pending" while its window is open, "none" when nothing ran
+	At      time.Time `json:"at,omitzero"`   // when that crawl started
+	Summary string    `json:"sum,omitempty"` // the crawl's one-line result
+	Run     int       `json:"run,omitempty"` // that job's main run, whose log a click on the square opens
+}
+
+// servedBy is the job that took care of the slot at occ, until the next
+// one: the first to start from skipWindow before it (that close, it covers
+// the slot — see Schedule.Due), or nil.
+func servedBy(jobs []*Job, occ, until time.Time) *Job {
+	var match *Job
+	for _, j := range jobs {
+		if !j.StartedAt.Before(occ.Add(-skipWindow)) && j.StartedAt.Before(until) && (match == nil || j.StartedAt.Before(match.StartedAt)) {
+			match = j
+		}
+	}
+	return match
+}
+
+// fill copies a job's result into the slot.
+func (s *slotRun) fill(j *Job) {
+	s.Status, s.At, s.Summary, s.Run = j.Status, j.StartedAt, j.Summary, j.mainStep().ID
+}
+
+// slotRuns matches each of a schedule's times to the crawl that served its
+// most recent occurrence: the first crawl of the provider — scheduled or
+// not — that started from skipWindow before it (a crawl that close covers
+// it, see Schedule.Due) until the schedule's next time. crawls are the
+// provider's crawl jobs, in any order.
+func slotRuns(s Schedule, crawls []*Job, now time.Time) []slotRun {
+	out := make([]slotRun, 0, len(s.Times))
+	for i, m := range s.Times {
+		occ := slotStart(now, 0).Add(time.Duration(m) * time.Minute)
+		if occ.After(now) {
+			occ = occ.Add(-24 * time.Hour)
+		}
+		gap := (s.Times[(i+1)%len(s.Times)] - m + 24*60) % (24 * 60)
+		if gap == 0 {
+			gap = 24 * 60
+		}
+		until := occ.Add(time.Duration(gap) * time.Minute)
+
+		slot := slotRun{Min: m, Status: "none"}
+		switch match := servedBy(crawls, occ, until); {
+		case match != nil:
+			slot.fill(match)
+		case until.After(now):
+			slot.Status = "pending" // still inside its window: due, queued, or not reached yet
+		}
+		out = append(out, slot)
+	}
+	return out
 }
 
 // Running reports whether the row should read as running: its own run, or
@@ -140,39 +201,25 @@ type schedulesPageData struct {
 	Explanations   map[int]string // cached answers by run ID
 
 	Capacity int
-	// Timeline is the 24-hour picture above the table, as JSON for app.js to
-	// draw in the viewer's timezone (see timelineData).
+	// System is Board Console's own daily jobs, listed after the providers.
+	System []systemRow
+
+	// Timeline is the plan's load strip, as JSON for app.js to draw in the
+	// viewer's timezone (see timelineData).
 	Timeline template.JS
 }
 
-// timelineData is what the Schedules timeline draws: each enabled
-// schedule's run starts (minutes after 00:00 UTC — every run is one
-// 15-minute block, see planner.go), the load per slot, and the daily cleanup —
-// app.js shifts it all into the viewer's timezone.
+// timelineData is what the Schedules plan needs beyond the rows it is
+// drawn on (each row carries its own times): the load per 15-minute slot
+// and the capacity it is measured against; app.js shifts it into the
+// viewer's timezone.
 type timelineData struct {
-	Capacity   int              `json:"capacity"`
-	Rows       []timelineRow    `json:"rows"`
-	Load       [slotsPerDay]int `json:"load"`
-	CleanupMin int              `json:"cleanupMin"`
-}
-
-type timelineRow struct {
-	Provider string `json:"provider"`
-	Starts   []int  `json:"starts"` // minutes after 00:00 UTC
+	Capacity int              `json:"capacity"`
+	Load     [slotsPerDay]int `json:"load"`
 }
 
 func buildTimeline(schedules []Schedule, capacity int) template.JS {
-	d := timelineData{Capacity: capacity, Rows: []timelineRow{}}
-	for _, s := range schedules {
-		if !s.Enabled {
-			continue
-		}
-		d.Rows = append(d.Rows, timelineRow{Provider: s.Provider, Starts: s.Times})
-	}
-	d.Load = loadProfile(schedules)
-	// The cleanup runs at cleanupHour in the container's local time.
-	c := time.Date(2000, 1, 1, cleanupHour, 0, 0, 0, time.Local).UTC()
-	d.CleanupMin = c.Hour()*60 + c.Minute()
+	d := timelineData{Capacity: capacity, Load: loadProfile(schedules)}
 	b, err := json.Marshal(d)
 	if err != nil {
 		return "{}"
@@ -192,6 +239,20 @@ func buildSchedulesPageData(app *App, r *http.Request) schedulesPageData {
 		}
 	}
 
+	crawls := map[string][]*Job{}
+	systemJobs := map[string][]*Job{} // newest first, like buildJobs
+	for _, j := range buildJobs(app.activity.List()) {
+		switch j.Kind {
+		case "Crawl", "Full re-crawl":
+			crawls[j.Provider] = append(crawls[j.Provider], j)
+		case "Cleanup": // a Preview is a dry run and serves no slot
+			systemJobs[sysCleanup] = append(systemJobs[sysCleanup], j)
+		case "Recount companies":
+			systemJobs[sysRecount] = append(systemJobs[sysRecount], j)
+		}
+	}
+	now := time.Now().Round(0)
+
 	schedules := app.schedules.List()
 	full := app.runner.CrawlCount() >= scheduleCapacity()
 	var rows []scheduleRow
@@ -202,6 +263,9 @@ func buildSchedulesPageData(app *App, r *http.Request) schedulesPageData {
 			Crawling:  app.runner.Crawling(s.Provider),
 		}
 		row.Queued = s.Enabled && row.NextRun.IsZero() && !row.Crawling && full
+		if b, err := json.Marshal(slotRuns(s, crawls[s.Provider], now)); err == nil {
+			row.Slots = string(b)
+		}
 		rows = append(rows, row)
 	}
 
@@ -225,6 +289,126 @@ func buildSchedulesPageData(app *App, r *http.Request) schedulesPageData {
 
 		Capacity: scheduleCapacity(),
 		Timeline: buildTimeline(schedules, scheduleCapacity()),
+		System:   buildSystemRows(app.system.List(), systemJobs, now),
+	}
+}
+
+// systemRow is one system job on the Schedules plan.
+type systemRow struct {
+	SystemJob
+	Info    systemJobInfo
+	NextRun time.Time // zero while paused
+	Running bool      // a run of it is in flight, however it was started
+	Slot    string    // its one daily run as slotRun JSON, like a schedule's Slots
+	// LatestRun is its newest job's main run, for the log under the row.
+	LatestRun *Run
+}
+
+// LastBadge is the last run's status in the words the provider rows use.
+func (r systemRow) LastBadge() string {
+	if r.LastStatus == StatusFailed {
+		return OutcomeFailed
+	}
+	return OutcomeSuccess
+}
+
+func buildSystemRows(settings []SystemJob, jobs map[string][]*Job, now time.Time) []systemRow {
+	var rows []systemRow
+	for _, j := range settings {
+		info, _ := systemJobInfoOf(j.Key)
+		row := systemRow{SystemJob: j, Info: info, NextRun: j.NextRun(now)}
+		if list := jobs[j.Key]; len(list) > 0 {
+			row.LatestRun = list[0].mainStep().Run
+			for _, job := range list {
+				row.Running = row.Running || job.Running()
+			}
+		}
+		// Its square: the job that served its latest slot — the same rule
+		// as a schedule's (slotRuns) — however it was started.
+		occ := slotAt(now, j.Minute)
+		slot := slotRun{Min: j.Minute, Status: "none"}
+		switch match := servedBy(jobs[j.Key], occ, occ.Add(24*time.Hour)); {
+		case match != nil:
+			slot.fill(match)
+		case j.Due(now):
+			slot.Status = "pending"
+		}
+		if b, err := json.Marshal([]slotRun{slot}); err == nil {
+			row.Slot = string(b)
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+// runLogData is one run's log with its Explain control: the "run-log"
+// template's data.
+type runLogData struct {
+	Run            *Run
+	Explanation    string // cached answer, if it was asked for already
+	ExplainEnabled bool
+}
+
+func runLog(run *Run, explanations map[int]string, explainEnabled bool) runLogData {
+	return runLogData{Run: run, Explanation: explanations[run.ID], ExplainEnabled: explainEnabled}
+}
+
+// handleScheduleRun is a square's click on the Schedules plan: one run's
+// log, as the same "run-log" fragment the rows render, for app.js to show
+// under the row.
+func handleScheduleRun(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.Atoi(r.URL.Query().Get("id"))
+		run, ok := app.activity.Get(id)
+		if err != nil || !ok {
+			http.Error(w, "run not found — it may have been trimmed from the log", http.StatusNotFound)
+			return
+		}
+		html, err := app.tmpl.Fragment("run-log", runLog(run, app.explainer.Cached(), app.explainer.Enabled()))
+		if err != nil {
+			http.Error(w, "render error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(html))
+	}
+}
+
+// handleSystemToggle pauses or resumes a system job.
+func handleSystemToggle(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "bad form", http.StatusBadRequest)
+			return
+		}
+		if err := app.system.Toggle(r.FormValue("key")); err != nil {
+			actionError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		actionDone(w, r, "/schedules")
+	}
+}
+
+// handleSystemTime re-times a system job: one hour/minute row in the
+// operator's timezone, read the same way as a schedule's (formTimes).
+func handleSystemTime(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "bad form", http.StatusBadRequest)
+			return
+		}
+		times, err := formTimes(r)
+		if err == nil && len(times) != 1 {
+			err = fmt.Errorf("pick the hour and the minutes")
+		}
+		if err == nil {
+			err = app.system.SetTime(r.FormValue("key"), times[0])
+		}
+		if err != nil {
+			actionError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		actionDone(w, r, "/schedules")
 	}
 }
 
@@ -338,17 +522,25 @@ func handleScheduleSave(app *App) http.HandlerFunc {
 // formTimes reads the modal's time rows — parallel "hour" and "minute"
 // fields in the operator's timezone, tz_offset minutes east of UTC (set by
 // the browser; absent, the rows are UTC) — as minutes after 00:00 UTC. A
-// row with either half unset is an unfinished row and is ignored.
+// row with both halves unset is an unused row and is ignored; one with only
+// one half set is refused, since the time it meant is unknown.
 func formTimes(r *http.Request) ([]int, error) {
 	hours, minutes := r.Form["hour"], r.Form["minute"]
 	tz, _ := strconv.Atoi(r.FormValue("tz_offset"))
 	var out []int
 	for i := range hours {
-		if i >= len(minutes) || hours[i] == "" || minutes[i] == "" {
+		minute := ""
+		if i < len(minutes) {
+			minute = minutes[i]
+		}
+		if hours[i] == "" && minute == "" {
 			continue
 		}
+		if hours[i] == "" || minute == "" {
+			return nil, fmt.Errorf("time %d is missing the hour or the minutes", i+1)
+		}
 		h, errH := strconv.Atoi(hours[i])
-		m, errM := strconv.Atoi(minutes[i])
+		m, errM := strconv.Atoi(minute)
 		if errH != nil || errM != nil || h < 0 || h > 23 || m < 0 || m > 59 || m%slotMinutes != 0 {
 			return nil, fmt.Errorf("every run must be a time on the 15-minute grid")
 		}

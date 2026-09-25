@@ -37,7 +37,7 @@ type Runner struct {
 	csv      *CSVStore
 	activity *ActivityLog
 	db       *DBStore // read-only; nil falls back to the CSV's frozen added column
-	cleanup  *CleanupStore
+	system   *SystemStore
 	bin      Binaries
 
 	crawlMu  sync.Mutex
@@ -97,12 +97,12 @@ func DefaultBinaries() Binaries {
 	}
 }
 
-func NewRunner(csv *CSVStore, activity *ActivityLog, db *DBStore, cleanup *CleanupStore, bin Binaries) *Runner {
+func NewRunner(csv *CSVStore, activity *ActivityLog, db *DBStore, system *SystemStore, bin Binaries) *Runner {
 	return &Runner{
 		csv:       csv,
 		activity:  activity,
 		db:        db,
-		cleanup:   cleanup,
+		system:    system,
 		bin:       bin,
 		ingestSem: make(chan struct{}, maxConcurrentIngest),
 		crawling:  map[string]bool{},
@@ -485,7 +485,7 @@ func (r *Runner) RunBatch(providers []string, reindexAfter bool) error {
 // the jobs of boards unreachable for 60 days AND of boards whose feed has
 // been empty for 30 — freehire arms those two passes with separate flags,
 // so both are passed — then queues a reindex through the coalesced path.
-// A real run is recorded in cleanup.json, which is what the daily slot is
+// A real run is recorded in system.json, which is what its daily slot is
 // measured against; a Preview is not.
 //
 // It reports false, starting nothing, when a cleanup is already running:
@@ -513,7 +513,7 @@ func (r *Runner) StartCleanup(apply bool) bool {
 		if err != nil {
 			status = StatusFailed
 		}
-		if recErr := r.cleanup.Record(startedAt, status); recErr != nil {
+		if recErr := r.system.Record(sysCleanup, startedAt, status); recErr != nil {
 			log.Printf("cleanup: record run: %v", recErr)
 		}
 		r.queueReindex(job)
@@ -529,7 +529,9 @@ func (r *Runner) StartCleanup(apply bool) bool {
 }
 
 // StartCompanyRefresh runs the company refresh (see companyRefresh) in the
-// background. It reports false, starting nothing, when one is already
+// background — the "Recount companies" system job, whether its daily time
+// came or it was started by hand; either way the run is recorded as the
+// job's last. It reports false, starting nothing, when one is already
 // running — both steps are idempotent, so a second copy could only repeat it.
 func (r *Runner) StartCompanyRefresh() bool {
 	if !r.companyMu.TryLock() {
@@ -537,7 +539,14 @@ func (r *Runner) StartCompanyRefresh() bool {
 	}
 	go func() {
 		defer r.companyMu.Unlock()
-		_ = r.companyRefresh(r.activity.NewJob())
+		startedAt := time.Now().Round(0)
+		status := StatusDone
+		if err := r.companyRefresh(r.activity.NewJob()); err != nil {
+			status = StatusFailed
+		}
+		if err := r.system.Record(sysRecount, startedAt, status); err != nil {
+			log.Printf("recount companies: record run: %v", err)
+		}
 	}()
 	return true
 }
