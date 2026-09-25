@@ -315,8 +315,11 @@ function localizeTimes() {
     var d = new Date(el.getAttribute("datetime"));
     if (isNaN(d)) return;
     var hm = pad(d.getHours()) + ":" + pad(d.getMinutes());
-    // data-local="hm" is a time of day alone (a schedule's planned times).
+    // data-local="hm" is a time of day alone (a schedule's planned times);
+    // "short" drops the year and seconds where space is tight (the plan's
+    // provider column).
     el.textContent = el.dataset.local === "hm" ? hm
+      : el.dataset.local === "short" ? pad(d.getDate()) + "/" + pad(d.getMonth() + 1) + " " + hm
       : pad(d.getDate()) + "/" + pad(d.getMonth() + 1) + "/" + d.getFullYear() + " - " + hm + ":" + pad(d.getSeconds());
     el.title = d.toString();
   });

@@ -76,7 +76,7 @@
               {{else if and .Enabled (not .Running) .NextRun.IsZero}}<span class="status-dot run-pending"></span><span>due now</span>
               {{else if $lc.At.IsZero}}<span class="status-dot run-none"></span><span>never run</span>
               {{else}}<span class="status-dot run-{{$lc.Badge}}" title="Last run: {{$lc.Status}}{{with $lc.Summary}} · {{.}}{{end}}"></span>{{end}}
-              {{if not $lc.At.IsZero}}<time datetime="{{iso $lc.At}}" data-local>{{$lc.At.UTC.Format "02/01/2006 - 15:04:05"}} UTC</time>{{end}}
+              {{if not $lc.At.IsZero}}<time datetime="{{iso $lc.At}}" data-local="short">{{$lc.At.UTC.Format "02/01 15:04"}}</time>{{end}}
             </div>
           </td>
           <td class="plan-cell">
@@ -136,7 +136,7 @@
               {{if eq .Last.Status "running"}}<span class="status-dot run-running"></span><span>crawling</span>
               {{else if .Last.At.IsZero}}<span class="status-dot run-none"></span><span>never crawled</span>
               {{else}}<span class="status-dot run-{{.Last.Badge}}" title="Last crawl: {{.Last.Status}}{{with .Last.Summary}} · {{.}}{{end}}"></span>{{end}}
-              {{if not .Last.At.IsZero}}<time datetime="{{iso .Last.At}}" data-local>{{.Last.At.UTC.Format "02/01/2006 - 15:04:05"}} UTC</time>{{end}}
+              {{if not .Last.At.IsZero}}<time datetime="{{iso .Last.At}}" data-local="short">{{.Last.At.UTC.Format "02/01 15:04"}}</time>{{end}}
             </div>
           </td>
           <td class="plan-cell">
@@ -146,7 +146,8 @@
           </td>
           <td class="col-toggle">
             <a class="btn btn-secondary btn-sm plan-add" href="/schedules?open=add&provider={{.Provider}}"
-               data-schedule-open data-provider="{{.Provider}}">+ Schedule</a>
+               data-schedule-open data-provider="{{.Provider}}" title="Add a schedule for {{.Provider}}"
+               aria-label="Add a schedule for {{.Provider}}">+</a>
           </td>
           <td class="col-actions">
             <div class="kebab-wrap">
@@ -184,7 +185,7 @@
               {{if .Running}}<span class="status-dot run-running"></span><span>running</span>
               {{else if .LastRun.IsZero}}<span class="status-dot run-none"></span><span>never run</span>
               {{else}}<span class="status-dot run-{{.LastBadge}}" title="Last run: {{.LastBadge}}"></span>{{end}}
-              {{if not .LastRun.IsZero}}<time datetime="{{iso .LastRun}}" data-local>{{.LastRun.UTC.Format "02/01/2006 - 15:04:05"}} UTC</time>{{end}}
+              {{if not .LastRun.IsZero}}<time datetime="{{iso .LastRun}}" data-local="short">{{.LastRun.UTC.Format "02/01 15:04"}}</time>{{end}}
             </div>
           </td>
           <td class="plan-cell">

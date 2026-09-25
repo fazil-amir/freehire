@@ -841,19 +841,24 @@ code {
 .tabs button.active { background: var(--accent-muted); color: var(--accent); }
 .tabs button:hover:not(.active) { background: var(--surface-raised); color: var(--text); }
 
-.plan-col-provider { width: 210px; }
-.plan-col-toggle { width: 84px; }
-.plan-col-actions { width: 48px; }
+/* The outer columns are sized to their content, so the timeline gets
+   every pixel left: a name over a short "25/09 15:00", a toggle, a ⋮. */
+.plan-col-provider { width: 160px; }
+.plan-col-toggle { width: 76px; }
+.plan-col-actions { width: 36px; }
+.plan-table th:first-child, .plan-table td:first-child { padding-right: 8px; }
+.plan-table .col-toggle { padding-left: 4px; padding-right: 8px; }
+.plan-table .col-actions { padding-left: 0; padding-right: 12px; }
 
 /* Provider cell: the name, and under it how its last crawl went. */
-.plan-name { font-weight: 500; }
+.plan-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .plan-last {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 4px 8px;
+  gap: 8px;
   margin-top: 6px;
   font-size: 12px;
+  white-space: nowrap;
   color: var(--text-faint);
 }
 /* The last run's result, as the same square the timeline uses. */
@@ -987,7 +992,7 @@ code {
 }
 .plan-group-note { margin-left: 10px; }
 .tl-tag.tl-tag-neutral { background: var(--surface-raised); color: var(--text-muted); }
-.plan-add { height: 28px; padding: 0 10px; font-size: 12px; white-space: nowrap; text-decoration: none; margin-right: 5px; }
+.plan-add { width: 38px; height: 28px; padding: 0; font-size: 16px; white-space: nowrap; text-decoration: none; }
 .sys-icon { margin-right: 8px; color: var(--pill-cleanup); }
 
 /* Under the table: the summary and the legend. */
