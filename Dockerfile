@@ -35,42 +35,42 @@ RUN apk add --no-cache curl xz \
  && install -m 0755 /tmp/typst-x86_64-unknown-linux-musl/typst /usr/local/bin/typst \
  && /usr/local/bin/typst --version
 
-# --- board-console build stage: board-console is a separate Go module (its own
+# --- boardly-api build stage: boardly-api is a separate Go module (its own
 # go.mod, zero imports of freehire's internal/... packages) that lives in this repo
 # purely so it comes up with `make up` like every other service — it has no
 # code-level relationship to freehire otherwise. ---
-FROM golang:1.26-alpine AS board-console-build
+FROM golang:1.26-alpine AS boardly-api-build
 WORKDIR /src
-COPY board-console/go.mod board-console/go.sum* ./
+COPY boardly-api/go.mod boardly-api/go.sum* ./
 RUN go mod download
-COPY board-console/ .
-# Stamp the build info /api/v1/meta reports (board-console/buildinfo.go): .git is not in
-# the build context, so the build ID is a fingerprint of board-console's own
+COPY boardly-api/ .
+# Stamp the build info /api/v1/meta reports (boardly-api/buildinfo.go): .git is not in
+# the build context, so the build ID is a fingerprint of boardly-api's own
 # source — data/ excluded, since that is runtime state, not code.
 RUN BUILD_ID="$(find . -type f -not -path './data/*' | sort | xargs sha256sum | sha256sum | cut -c1-8)" \
  && BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
  && CGO_ENABLED=0 GOOS=linux go build \
       -ldflags="-s -w -X main.buildID=${BUILD_ID} -X main.buildRaw=${BUILD_DATE}" \
-      -o /out/board-console .
+      -o /out/boardly-api .
 
-# --- board-console runtime stage: reuses the freehire binaries the `build` stage
+# --- boardly-api runtime stage: reuses the freehire binaries the `build` stage
 # above already compiled (bulk-add-boards, ingest, reindex, close-chronic-boards, recount-companies,
 # reindex-companies) rather than recompiling
-# them — board-console runs them as local subprocesses inside its own container,
+# them — boardly-api runs them as local subprocesses inside its own container,
 # never via `docker exec` into the app container. ---
-FROM debian:stable-slim AS board-console
+FROM debian:stable-slim AS boardly-api
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates \
  && rm -rf /var/lib/apt/lists/* \
  && groupadd --system --gid 65532 nonroot \
  && useradd --system --uid 65532 --gid nonroot --home-dir /app nonroot
 WORKDIR /app
-COPY --from=board-console-build /out/board-console /app/board-console
+COPY --from=boardly-api-build /out/boardly-api /app/boardly-api
 COPY --from=build /out/ingest /out/reindex /out/bulk-add-boards /out/add-board /out/close-chronic-boards \
      /out/recount-companies /out/reindex-companies /app/
 EXPOSE 8091
 USER nonroot:nonroot
-ENTRYPOINT ["/app/board-console"]
+ENTRYPOINT ["/app/boardly-api"]
 
 # --- runtime stage ---
 # debian-slim (not distroless/static) because résumé text extraction shells out to

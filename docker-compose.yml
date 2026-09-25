@@ -120,7 +120,7 @@ services:
       # now) — set real values in .env to actually exercise a model-backed surface.
       # Catalogue scope (see .env.example): false = every job, true = IT only. The server
       # reads it on the link-import path, which must agree with ingest and the search index
-      # about what is searchable — so board-console below gets the SAME expression.
+      # about what is searchable — so boardly-api below gets the SAME expression.
       CATALOGUE_TECH_ONLY: "${CATALOGUE_TECH_ONLY:-false}"
       LLM_BASE_URL: "${LLM_BASE_URL:-}"
       LLM_API_KEY: "${LLM_API_KEY:-}"
@@ -177,29 +177,29 @@ services:
       - "${HIRE_HOST_PORT:-8080}:8080"
 
   # Internal ops tool for managing freehire's board catalog — a fully separate Go
-  # module (board-console/go.mod, zero imports of freehire's internal/... packages,
+  # module (boardly-api/go.mod, zero imports of freehire's internal/... packages,
   # no DB access from its own code) that only happens to live in this repo and this
   # compose file so it comes up with `make up`. It drives freehire's own
   # bulk-add-boards/ingest/reindex binaries as LOCAL SUBPROCESSES inside its own
   # container (copied in at build time from the `build` stage above, not
   # recompiled) — never `docker exec` into the `app` container. See
-  # board-console/README.md.
-  # One-shot, like minio-init: makes board-console/data writable by the
-  # board-console container (uid/gid 65532) while it stays owned by — and
+  # boardly-api/README.md.
+  # One-shot, like minio-init: makes boardly-api/data writable by the
+  # boardly-api container (uid/gid 65532) while it stays owned by — and
   # `git pull`-able for — whoever cloned the repo. Without it a fresh Linux
-  # server crashes board-console on start with "permission denied" (Docker
+  # server crashes boardly-api on start with "permission denied" (Docker
   # Desktop on macOS never enforces this). It changes only the GROUP and group
   # bits, never the owner; runs on every `make up` and is a no-op once set.
-  board-console-init:
+  boardly-api-init:
     image: alpine:3.20
     volumes:
-      - ./board-console/data:/data
+      - ./boardly-api/data:/data
     command: >
       sh -c "chgrp -R 65532 /data && chmod -R g+rwX,o+rX /data && chmod g+s /data"
 
-  # board-console's only way to Docker: the Server card reads the build cache's
+  # boardly-api's only way to Docker: the Server card reads the build cache's
   # size and "Clear build cache" prunes it. The raw socket is full control of the
-  # host, so board-console never gets it — this proxy lets through only what the
+  # host, so boardly-api never gets it — this proxy lets through only what the
   # sections below allow: SYSTEM (GET /system/df) and BUILD with POST (/build/prune;
   # /build itself could also build an image, but nothing here can run a container,
   # exec, or touch volumes or networks). No published port: reachable from the
@@ -213,12 +213,12 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
-  board-console:
+  boardly-api:
     build:
       context: .
-      target: board-console
+      target: boardly-api
     depends_on:
-      board-console-init:
+      boardly-api-init:
         condition: service_completed_successfully
       db:
         condition: service_healthy
@@ -229,7 +229,7 @@ services:
       meilisearch:
         condition: service_started
       # Its only way to Docker (the Server card's build cache): started with it,
-      # so bringing board-console up alone never leaves the card "not reachable".
+      # so bringing boardly-api up alone never leaves the card "not reachable".
       docker-proxy:
         condition: service_started
     environment:
@@ -249,7 +249,7 @@ services:
       # for its own multi-million-job index; this catalogue's is far smaller.
       # Raise it as the index grows (check: du -sh /meili_data in meilisearch).
       REINDEX_MIN_FREE_GB: "${REINDEX_MIN_FREE_GB:-20}"
-      # Must match the app's value above: every ingest/reindex/recount board-console runs
+      # Must match the app's value above: every ingest/reindex/recount boardly-api runs
       # inherits it, and a crawl that disagrees with the site about what belongs in the
       # catalogue stores (or drops) the wrong jobs. Override both at once from .env.
       CATALOGUE_TECH_ONLY: "${CATALOGUE_TECH_ONLY:-false}"
@@ -268,17 +268,17 @@ services:
       # The JSON API (/api/v1) a separate UI drives. A set key is required as
       # "Authorization: Bearer <key>"; unset leaves the API open — local use only.
       # CORS_ORIGINS lists the browser origins allowed to call it (comma list).
-      BOARD_CONSOLE_API_KEY: "${BOARD_CONSOLE_API_KEY:-}"
-      BOARD_CONSOLE_CORS_ORIGINS: "${BOARD_CONSOLE_CORS_ORIGINS:-http://localhost:5173}"
+      BOARDLY_API_KEY: "${BOARDLY_API_KEY:-}"
+      BOARDLY_CORS_ORIGINS: "${BOARDLY_CORS_ORIGINS:-http://localhost:5173}"
     ports:
-      # Host port 8040 (8091 clashes with Beszel). Override with BOARD_CONSOLE_HOST_PORT.
-      - "${BOARD_CONSOLE_HOST_PORT:-8040}:8091"
+      # Host port 8040 (8091 clashes with Beszel). Override with BOARDLY_HOST_PORT.
+      - "${BOARDLY_HOST_PORT:-8040}:8091"
     volumes:
-      # board-console's only persistent store, kept on the host across rebuilds. Only
+      # boardly-api's only persistent store, kept on the host across rebuilds. Only
       # combined_boards.csv is in git; activity/schedule/system are per machine
       # (git-ignored). Write access for the container (uid 65532) is set up by
-      # board-console-init above.
-      - ./board-console/data:/app/data
+      # boardly-api-init above.
+      - ./boardly-api/data:/app/data
       # Read-only: only statfs'd by reindex's disk-guard (see MEILI_DATA_DIR),
       # never written — Meilisearch itself is the volume's only writer.
       - meilisearch_data:/var/lib/freehire/meili:ro
