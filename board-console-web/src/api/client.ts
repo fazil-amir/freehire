@@ -1,10 +1,13 @@
 import type { ActivityPage, Catalog, ExplainSection, Meta, RunDetail, ScheduleLoad, SchedulesPage, SystemStats } from "./types";
 
-// The one way to Board Console: its base URL and optional key come from the
-// environment (.env.example). Every failure becomes an ApiError carrying the
-// server's own message ({"error": "…"}), which the UI shows as it is.
-const BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8040").replace(/\/$/, "");
-const KEY = import.meta.env.VITE_API_KEY || "";
+// The one way to Board Console. Its base URL and optional key come from
+// config.js (written by the Docker container at start) and otherwise from the
+// build's VITE_* variables (.env.local in development). Every failure becomes
+// an ApiError carrying the server's own message ({"error": "…"}), which the UI
+// shows as it is.
+const runtime = window.__BOARD_CONSOLE__ ?? {};
+const BASE = (runtime.apiBaseUrl || import.meta.env.VITE_API_BASE_URL || "http://localhost:8040").replace(/\/$/, "");
+const KEY = runtime.apiKey || import.meta.env.VITE_API_KEY || "";
 
 export class ApiError extends Error {
   constructor(message: string, readonly status: number) {

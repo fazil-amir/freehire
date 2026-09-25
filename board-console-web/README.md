@@ -5,26 +5,56 @@ It talks to Board Console only through its JSON API (`/api/v1`) and shares no co
 with the repository it currently sits in, so this folder can be moved to its own
 repository as it is.
 
-## Run it
+## Run it (development)
 
 1. Start Board Console (it serves the API on its port, `8040` by default).
 2. Here:
 
    ```sh
-   cp .env.example .env.local   # adjust VITE_API_BASE_URL if needed
+   cp .env.example .env.local   # uncomment the VITE_* lines and adjust
    npm install
    npm run dev                  # http://localhost:5173
    ```
 
-Board Console allows `http://localhost:5173` by default. Any other origin must be
-listed in its `BOARD_CONSOLE_CORS_ORIGINS`.
+## Run it with Docker (production)
+
+The image builds the app (`npm ci` + `npm run build`) and serves it with nginx. The
+API's address is **not** baked into the build: the container writes it into
+`/config.js` from its environment at every start, so one image serves any
+environment.
+
+```sh
+cp .env.example .env         # set API_BASE_URL (and API_KEY if the API needs one)
+docker compose up -d --build # http://<host>:5173, restarts on crash and on reboot
+docker compose logs -f       # first line says which API it points at
+```
+
+- **Update to new code:** `git pull && docker compose up -d --build`
+- **Change the API address or key:** edit `.env`, then `docker compose up -d` — a
+  recreate, no rebuild.
+- **Stop:** `docker compose down`
+
+The container refuses to start without `API_BASE_URL` (its log says so), rather than
+serve a page that silently calls the viewer's own `localhost`.
+
+## Allowing the browser in (CORS)
+
+The page calls Board Console straight from the browser, so Board Console must list
+this app's address in its `BOARD_CONSOLE_CORS_ORIGINS` (a comma list), e.g.
+`http://localhost:5173,http://<server>:5173`. It allows `http://localhost:5173` by
+default.
 
 ## Configuration
 
-| Variable | Meaning |
-|---|---|
-| `VITE_API_BASE_URL` | Board Console's address, e.g. `http://localhost:8040` |
-| `VITE_API_KEY` | Only when Board Console sets `BOARD_CONSOLE_API_KEY`. A `VITE_` variable ships to the browser, so use it locally only — in a shared deployment the API is called by a server, never with a key in the page. |
+| Variable | Where | Meaning |
+|---|---|---|
+| `API_BASE_URL` | Docker (`.env`) | Board Console's address **as the browser reaches it**, e.g. `http://<server>:8040` |
+| `API_KEY` | Docker (`.env`) | Only when Board Console sets `BOARD_CONSOLE_API_KEY` |
+| `WEB_PORT` | Docker (`.env`) | Host port the app is served on (default `5173`) |
+| `VITE_API_BASE_URL` / `VITE_API_KEY` | dev (`.env.local`) | The same two, for `npm run dev` |
+
+The key reaches the browser either way, so anyone who can open the page can read it:
+it keeps out passers-by on an open port, not someone who can load the app.
 
 ## What is here
 

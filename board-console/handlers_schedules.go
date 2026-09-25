@@ -3,21 +3,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"html/template"
 	"net/http"
-	"sort"
-	"strconv"
 	"time"
 )
-
-// addScheduleForm is the add/edit schedule modal's field values — round-
-// tripped back into the template on a validation failure so nothing the
-// operator typed is lost. ID is empty for a new schedule, set for an edit.
-type addScheduleForm struct {
-	ID       string
-	Provider string
-	Times    []int // minutes after 00:00 UTC
-}
 
 type scheduleRow struct {
 	Schedule
@@ -33,7 +21,7 @@ type scheduleRow struct {
 	// running, so it waits for one to end.
 	Queued bool
 	// Slots is each of the day's runs with how its most recent run went, as
-	// JSON for app.js to colour the row's squares (see slotRuns).
+	// slotRun JSON (see slotRuns).
 	Slots string
 }
 
@@ -139,48 +127,8 @@ func (r scheduleRow) LastCrawl() lastCrawlView {
 	return lastCrawlView{Status: status, Badge: badge, At: r.LastRun}
 }
 
-// scheduleModal is the shared add/edit schedule dialog's state — the
-// "schedule-modal" template, rendered by every page that can add or edit a
-// schedule (Schedules and Catalog), each passing its own provider list.
-type scheduleModal struct {
-	Capacity  int   // a slot holding this many runs is booked
-	Hours     []int // the time rows' choices: 0..23
-	Minutes   []int // 0, 15, 30, 45
-	Form      addScheduleForm
-	Error     string
-	Open      bool     // reopen on load: a no-JS validation failure round-trip
-	Providers []string // the provider dropdown's options
-}
-
-func newScheduleModal(providers []string) scheduleModal {
-	m := scheduleModal{Providers: providers, Capacity: scheduleCapacity()}
-	for h := 0; h < 24; h++ {
-		m.Hours = append(m.Hours, h)
-	}
-	for mm := 0; mm < 60; mm += slotMinutes {
-		m.Minutes = append(m.Minutes, mm)
-	}
-	return m
-}
-
-// timeRow is one run-time row of the modal: Minutes after 00:00 UTC, split
-// into the hour and minute it shows, or -1 for an empty row.
-type timeRow struct {
-	Modal        scheduleModal
-	Minutes      int
-	Hour, Minute int
-}
-
-func newTimeRow(m scheduleModal, minutes int) timeRow {
-	if minutes < 0 {
-		return timeRow{Modal: m, Minutes: -1, Hour: -1, Minute: -1}
-	}
-	return timeRow{Modal: m, Minutes: minutes, Hour: minutes / 60, Minute: minutes % 60}
-}
-
-// handleScheduleLoad is the schedule modal's booked-slot check: fetched
-// every time the modal opens, so it always reflects the schedules as they
-// are now, not as they were when the page was first rendered.
+// handleScheduleLoad is the day's load — crawls starting per 15-minute slot
+// — and the capacity: what a schedule editor checks a new time against.
 func handleScheduleLoad(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -191,46 +139,22 @@ func handleScheduleLoad(app *App) http.HandlerFunc {
 	}
 }
 
-type schedulesPageData struct {
-	Active        string
-	Schedules     []scheduleRow
-	DBError       string // set when the provider list fell back to the CSV's stale column
-	ScheduleModal scheduleModal
-
-	ExplainEnabled bool           // see activityPageData
-	Explanations   map[int]string // cached answers by run ID
-
-	Capacity int
-	// System is Board Console's own daily jobs, listed after the providers.
-	System []systemRow
+// schedulesPage is the Schedules plan, as the API serves it: the scheduled
+// providers, the added ones without a schedule, and the system jobs.
+type schedulesPage struct {
+	Schedules []scheduleRow
+	DBError   string // set when the provider list fell back to the CSV's stale column
+	Capacity  int
 	// Unscheduled is the added providers without a schedule, listed between
 	// the scheduled ones and System.
 	Unscheduled []unscheduledRow
-
-	// Timeline is the plan's load strip, as JSON for app.js to draw in the
-	// viewer's timezone (see timelineData).
-	Timeline template.JS
+	// System is Board Console's own daily jobs, listed after the providers.
+	System []systemRow
+	// AddedProviders are the providers a schedule can be made for.
+	AddedProviders []string
 }
 
-// timelineData is what the Schedules plan needs beyond the rows it is
-// drawn on (each row carries its own times): the load per 15-minute slot
-// and the capacity it is measured against; app.js shifts it into the
-// viewer's timezone.
-type timelineData struct {
-	Capacity int              `json:"capacity"`
-	Load     [slotsPerDay]int `json:"load"`
-}
-
-func buildTimeline(schedules []Schedule, capacity int) template.JS {
-	d := timelineData{Capacity: capacity, Load: loadProfile(schedules)}
-	b, err := json.Marshal(d)
-	if err != nil {
-		return "{}"
-	}
-	return template.JS(b)
-}
-
-func buildSchedulesPageData(app *App, r *http.Request) schedulesPageData {
+func buildSchedulesPage(app *App, r *http.Request) schedulesPage {
 	// List() is newest-first, so the first match per provider is its latest.
 	latest := map[string]*Run{}
 	for _, run := range app.activity.List() {
@@ -273,13 +197,7 @@ func buildSchedulesPageData(app *App, r *http.Request) schedulesPageData {
 	}
 
 	addedCounts, dbError := resolveAddedCounts(r.Context(), app)
-	var knownProviders []string
-	for p, n := range addedCounts {
-		if n > 0 {
-			knownProviders = append(knownProviders, p)
-		}
-	}
-	sort.Strings(knownProviders)
+	knownProviders := addedProviders(addedCounts)
 
 	scheduled := map[string]bool{}
 	for _, sch := range schedules {
@@ -293,32 +211,25 @@ func buildSchedulesPageData(app *App, r *http.Request) schedulesPageData {
 		unscheduled = append(unscheduled, newUnscheduledRow(p, latest[p], app.runner.Crawling(p), crawls[p], now))
 	}
 
-	return schedulesPageData{
-		Active:        "schedules",
-		Schedules:     rows,
-		DBError:       dbError,
-		ScheduleModal: newScheduleModal(knownProviders),
-
-		ExplainEnabled: app.explainer.Enabled(),
-		Explanations:   app.explainer.Cached(),
-
-		Capacity: scheduleCapacity(),
-		Timeline: buildTimeline(schedules, scheduleCapacity()),
-		System:   buildSystemRows(app.system.List(), systemJobs, now),
-
-		Unscheduled: unscheduled,
+	return schedulesPage{
+		Schedules:      rows,
+		DBError:        dbError,
+		Capacity:       scheduleCapacity(),
+		Unscheduled:    unscheduled,
+		System:         buildSystemRows(app.system.List(), systemJobs, now),
+		AddedProviders: knownProviders,
 	}
 }
 
 // unscheduledRow is an added provider with no schedule, listed on the
-// Schedules plan so the page covers the whole fleet: its last crawl, and
+// Schedules plan so it covers the whole fleet: its last crawl, and
 // the crawls started by hand as squares on the day.
 type unscheduledRow struct {
 	Provider string
 	Last     lastCrawlView
 	Crawling bool
 	// Runs is its crawls of the last 24 hours as slotRun JSON, each at the
-	// minute it started; app.js keeps the ones of the viewer's today.
+	// minute it started; a UI shows the ones of its viewer's today.
 	Runs string
 }
 
@@ -386,169 +297,10 @@ func buildSystemRows(settings []SystemJob, jobs map[string][]*Job, now time.Time
 	return rows
 }
 
-// runLogData is one run's log with its Explain control: the "run-log"
-// template's data.
-type runLogData struct {
-	Run            *Run
-	Explanation    string // cached answer, if it was asked for already
-	ExplainEnabled bool
-}
-
-func runLog(run *Run, explanations map[int]string, explainEnabled bool) runLogData {
-	return runLogData{Run: run, Explanation: explanations[run.ID], ExplainEnabled: explainEnabled}
-}
-
-// handleScheduleRun is a square's click on the Schedules plan: one run's
-// log, as the same "run-log" fragment the rows render, for app.js to show
-// under the row.
-func handleScheduleRun(app *App) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		id, err := strconv.Atoi(r.URL.Query().Get("id"))
-		run, ok := app.activity.Get(id)
-		if err != nil || !ok {
-			http.Error(w, "run not found — it may have been trimmed from the log", http.StatusNotFound)
-			return
-		}
-		html, err := app.tmpl.Fragment("run-log", runLog(run, app.explainer.Cached(), app.explainer.Enabled()))
-		if err != nil {
-			http.Error(w, "render error", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(html))
-	}
-}
-
-// handleSystemToggle pauses or resumes a system job.
-func handleSystemToggle(app *App) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, "bad form", http.StatusBadRequest)
-			return
-		}
-		if err := app.system.Toggle(r.FormValue("key")); err != nil {
-			actionError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		actionDone(w, r, "/schedules")
-	}
-}
-
-// handleSystemTime re-times a system job: one hour/minute row in the
-// operator's timezone, read the same way as a schedule's (formTimes).
-func handleSystemTime(app *App) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, "bad form", http.StatusBadRequest)
-			return
-		}
-		times, err := formTimes(r)
-		if err == nil && len(times) != 1 {
-			err = fmt.Errorf("pick the hour and the minutes")
-		}
-		if err == nil {
-			err = app.system.SetTime(r.FormValue("key"), times[0])
-		}
-		if err != nil {
-			actionError(w, http.StatusUnprocessableEntity, err.Error())
-			return
-		}
-		actionDone(w, r, "/schedules")
-	}
-}
-
-// handleSchedules also opens the add/edit modal pre-filled, via
-// ?open=add&provider=X or ?open=edit&id=Y — the no-JS fallback behind the
-// kebab menus' Add/Edit items, which with JS open the modal in place.
-func handleSchedules(app *App) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		data := buildSchedulesPageData(app, r)
-
-		switch r.URL.Query().Get("open") {
-		case "add":
-			data.ScheduleModal.Open = true
-			provider := r.URL.Query().Get("provider")
-			data.ScheduleModal.Form.Provider = provider
-			if sch, ok := app.schedules.ByProvider(provider); ok { // one per provider: edit it
-				data.ScheduleModal.Form = addScheduleForm{ID: sch.ID, Provider: sch.Provider, Times: sch.Times}
-			}
-			ensureProviderListed(&data.ScheduleModal, provider)
-		case "edit":
-			if sch, ok := app.schedules.Get(r.URL.Query().Get("id")); ok {
-				data.ScheduleModal.Open = true
-				data.ScheduleModal.Form = addScheduleForm{ID: sch.ID, Provider: sch.Provider, Times: sch.Times}
-				ensureProviderListed(&data.ScheduleModal, sch.Provider)
-			}
-		}
-
-		app.tmpl.Render(w, "schedules", data)
-	}
-}
-
-// ensureProviderListed guarantees the modal's provider dropdown always
-// contains whichever provider it's pre-filled with — a schedule being
-// edited might target a provider that's since fallen out of the "added"
-// set (dropped in the DB after the schedule was created), and without
-// this the pre-filled <option> simply wouldn't exist to select.
-func ensureProviderListed(m *scheduleModal, provider string) {
-	if provider == "" {
-		return
-	}
-	for _, p := range m.Providers {
-		if p == provider {
-			return
-		}
-	}
-	m.Providers = append(m.Providers, provider)
-	sort.Strings(m.Providers)
-}
-
-// handleScheduleSave creates a provider's schedule or updates the existing
-// one in place — one endpoint for both, since the add and edit modals are
-// the same form, and a provider has one schedule: saving "Add" for a
-// provider that already has one adds to nothing, it replaces that
-// schedule's times. A fetch from the modal gets a 204 or a 422 with the
-// message to show inline; a plain form post (no JS) on a validation
-// failure re-renders the schedules page with the modal open and everything
-// the operator chose still in place.
-func handleScheduleSave(app *App) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, "bad form", http.StatusBadRequest)
-			return
-		}
-		times, timesErr := formTimes(r)
-		form := addScheduleForm{ID: r.FormValue("id"), Provider: r.FormValue("provider"), Times: times}
-
-		var errMsg string
-		if timesErr != nil {
-			errMsg = timesErr.Error()
-		} else if err := saveSchedule(app, form.ID, form.Provider, form.Times); err != nil {
-			errMsg = err.Error()
-		}
-
-		if errMsg != "" {
-			if isFetch(r) {
-				actionError(w, http.StatusUnprocessableEntity, errMsg)
-				return
-			}
-			data := buildSchedulesPageData(app, r)
-			data.ScheduleModal.Form = form
-			data.ScheduleModal.Error = errMsg
-			data.ScheduleModal.Open = true
-			ensureProviderListed(&data.ScheduleModal, form.Provider)
-			app.tmpl.Render(w, "schedules", data)
-			return
-		}
-		actionDone(w, r, "/schedules")
-	}
-}
-
 // saveSchedule creates a provider's schedule or updates the existing one —
 // a provider has one schedule, so saving "Add" for a provider that already
 // has one replaces that schedule's times. times are minutes after 00:00 UTC.
-// Its error is the message to show the operator. Shared by the page's form
-// and the API.
+// Its error is the message to show the operator.
 func saveSchedule(app *App, id, provider string, times []int) error {
 	switch {
 	case provider == "":
@@ -565,60 +317,4 @@ func saveSchedule(app *App, id, provider string, times []int) error {
 		return app.schedules.Add(provider, times)
 	}
 	return app.schedules.Update(id, provider, times)
-}
-
-// formTimes reads the modal's time rows — parallel "hour" and "minute"
-// fields in the operator's timezone, tz_offset minutes east of UTC (set by
-// the browser; absent, the rows are UTC) — as minutes after 00:00 UTC. A
-// row with both halves unset is an unused row and is ignored; one with only
-// one half set is refused, since the time it meant is unknown.
-func formTimes(r *http.Request) ([]int, error) {
-	hours, minutes := r.Form["hour"], r.Form["minute"]
-	tz, _ := strconv.Atoi(r.FormValue("tz_offset"))
-	var out []int
-	for i := range hours {
-		minute := ""
-		if i < len(minutes) {
-			minute = minutes[i]
-		}
-		if hours[i] == "" && minute == "" {
-			continue
-		}
-		if hours[i] == "" || minute == "" {
-			return nil, fmt.Errorf("time %d is missing the hour or the minutes", i+1)
-		}
-		h, errH := strconv.Atoi(hours[i])
-		m, errM := strconv.Atoi(minute)
-		if errH != nil || errM != nil || h < 0 || h > 23 || m < 0 || m > 59 || m%slotMinutes != 0 {
-			return nil, fmt.Errorf("every run must be a time on the 15-minute grid")
-		}
-		out = append(out, ((h*60+m-tz)%(24*60)+24*60)%(24*60))
-	}
-	return out, nil
-}
-
-// handleScheduleDelete removes a schedule. The confirmation prompt lives
-// client-side (a plain confirm() on the delete form, no custom modal
-// needed for something this reversible-by-re-adding).
-func handleScheduleDelete(app *App) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, "bad form", http.StatusBadRequest)
-			return
-		}
-		_ = app.schedules.Delete(r.FormValue("id"))
-		actionDone(w, r, "/schedules")
-	}
-}
-
-func handleScheduleToggle(app *App) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, "bad form", http.StatusBadRequest)
-			return
-		}
-		id := r.FormValue("id")
-		_ = app.schedules.Toggle(id)
-		http.Redirect(w, r, "/schedules", http.StatusSeeOther)
-	}
 }

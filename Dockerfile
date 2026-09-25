@@ -44,7 +44,7 @@ WORKDIR /src
 COPY board-console/go.mod board-console/go.sum* ./
 RUN go mod download
 COPY board-console/ .
-# Stamp the footer's build info (board-console/buildinfo.go): .git is not in
+# Stamp the build info /api/v1/meta reports (board-console/buildinfo.go): .git is not in
 # the build context, so the build ID is a fingerprint of board-console's own
 # source — data/ excluded, since that is runtime state, not code.
 RUN BUILD_ID="$(find . -type f -not -path './data/*' | sort | xargs sha256sum | sha256sum | cut -c1-8)" \

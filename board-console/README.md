@@ -1,9 +1,14 @@
 # board-console
 
-An internal ops tool for managing which ATS/aggregator/career-site "boards"
-get added to freehire's catalog and crawled. It replaces the previous
-by-hand workflow of editing `combined_boards.csv` and running one-off
-commands against the running freehire stack.
+An internal ops service for managing which ATS/aggregator/career-site
+"boards" get added to freehire's catalog and crawled, on demand and on a
+schedule. It replaces the previous by-hand workflow of editing
+`combined_boards.csv` and running one-off commands against the running
+freehire stack.
+
+**It has no UI of its own.** Everything it does is a JSON API under
+`/api/v1` (see API below); the UI is a separate web app in its own
+repository — or any other client, such as the team's main dashboard.
 
 ## Isolation from freehire
 
@@ -49,8 +54,8 @@ to ignore if it's ever run directly against this file.
 
 **Added status is read live from Postgres, not the CSV.** A CSV `added`
 column can't stay in sync across separate dev/prod databases that might
-each run their own board-console against the same repo checkout, so
-Catalog and Schedules both read it fresh instead:
+each run their own board-console against the same repo checkout, so the
+catalog and schedules both read it fresh instead:
 ```sql
 SELECT provider, board, status, count(*)
 FROM boards WHERE status IN ('active', 'pending')
@@ -59,9 +64,9 @@ GROUP BY provider, board, status
 via a **read-only** `database/sql` connection (`db.go`, `jackc/pgx/v5/stdlib`)
 against the same `DATABASE_URL` docker-compose already passes to the `app`
 service — board-console's own Go code never writes to that database, ever.
-If it can't be reached, every page falls back to the CSV's frozen `added`
-column and shows a banner ("Couldn't reach the database — added status may
-be stale") rather than silently showing wrong data or crashing. `runner.go`'s
+If it can't be reached, it falls back to the CSV's frozen `added` column and
+says so (the `dbError` field of `/catalog` and `/schedules`) rather than
+silently serving wrong data or crashing. `runner.go`'s
 `runAdd()` correspondingly no longer marks the CSV's `added` column — the
 CSV's job is only the candidate list (`id`/`provider`/`board`/`company`)
 now.
@@ -70,7 +75,7 @@ now.
 schedules, written the same atomic way.
 
 `data/activity.jsonl` (JSON Lines — one snapshot per line) persists the run
-history shown on the Activity page, so it survives a restart. It's
+history (`/activity`), so it survives a restart. It's
 append-only rather than atomically rewritten on every update: each run gets
 a line on start, periodically while still running (throttled, so a chatty
 crawl doesn't hammer the disk), and always on finish. The last 500 distinct
@@ -103,22 +108,18 @@ every run — the owner is never changed, so git keeps working. Nothing to do
 by hand on a fresh server. (Docker Desktop on macOS never enforces these
 permissions, which is why the problem only ever showed up on the server.)
 
-## Credentials
+## Access
 
-Login is a single hardcoded username/password, checked in
-[`auth.go`](auth.go):
+There is no login. The API is guarded by two settings:
 
-```go
-const (
-	consoleUsername = "admin"
-	consolePassword = "change-me"
-)
-```
-
-**Change these before deploying anywhere reachable by more than you** —
-edit the constants directly and rebuild. Sessions are random tokens held in
-an in-memory map; restarting the process logs everyone out, which is fine
-for a private internal tool.
+- **`BOARD_CONSOLE_API_KEY`** — when set, every request needs
+  `Authorization: Bearer <key>` (compared in constant time). **Unset, the API
+  is open**: fine on a laptop, never on a reachable port. Set it anywhere
+  else, or keep the port closed and reach it over an SSH tunnel or a private
+  network.
+- **`BOARD_CONSOLE_CORS_ORIGINS`** — the comma-separated browser origins
+  allowed to call it (default `http://localhost:5173`, the UI's dev server).
+  A server-to-server caller needs no entry.
 
 ## Running it
 
@@ -131,14 +132,16 @@ make up
 ```
 
 No separate build or run step is needed — `make up` (`docker compose up
---build -d`) builds and starts it like everything else. Once running, it's
-reachable at:
+--build -d`) builds and starts it like everything else. Once running, its
+API is at:
 
 ```
-http://localhost:8040
+http://localhost:8040/api/v1
 ```
 
-(override the host port with `BOARD_CONSOLE_HOST_PORT`).
+(override the host port with `BOARD_CONSOLE_HOST_PORT`). The root, `/`,
+only answers where the API is. For the UI, run the separate web app and add
+its address to `BOARD_CONSOLE_CORS_ORIGINS`.
 
 ### Ports
 
@@ -147,7 +150,7 @@ be moved by setting its variable in `.env`.
 
 | Service | URL on the host | Container port | Override with |
 |---|---|---|---|
-| Board Console | http://localhost:8040 | 8091 | `BOARD_CONSOLE_HOST_PORT` |
+| Board Console API | http://localhost:8040/api/v1 | 8091 | `BOARD_CONSOLE_HOST_PORT` |
 | Web (the site) | http://localhost:8090 | 80 | `WEB_HOST_PORT` |
 | API (Go server) | http://localhost:8080 | 8080 | `HIRE_HOST_PORT` |
 | Postgres | localhost:5432 | 5432 | `DB_HOST_PORT` |
@@ -171,8 +174,8 @@ Outside the Docker Compose network, `bulk-add-boards`/`ingest`/`reindex`
 won't be on `PATH` at their default container locations (`/app/...`) — set
 `BULK_ADD_BOARDS_BIN`, `INGEST_BIN`, `REINDEX_BIN` to point at locally built
 copies (`go build -o ... ./cmd/<name>` from the repo root) if you want the
-Crawl/Reindex actions to actually run something in this mode. The web UI
-and CSV/schedule management work regardless.
+crawl/reindex actions to actually run something in this mode. The API and
+CSV/schedule management work regardless.
 
 ### Environment variables
 
@@ -183,134 +186,123 @@ and CSV/schedule management work regardless.
 | `DATABASE_URL` | — | Read-only Postgres connection for live added status (`db.go`), **and** passed through to the `ingest`/`reindex` subprocesses |
 | `MEILI_URL` / `MEILI_MASTER_KEY` | — | Passed through to `reindex` |
 | `BULK_ADD_BOARDS_BIN` / `INGEST_BIN` / `REINDEX_BIN` | `/app/bulk-add-boards` / `/app/ingest` / `/app/reindex` | Override the binary paths (for running outside the container) |
-| `OPENAI_API_KEY` | — | Enables **Explain this run** on Activity (the run's details and log tail go to the model with a built-in briefing on this tool). Set it in `.env`, never in a committed file; unset leaves the button disabled |
+| `BOARD_CONSOLE_API_KEY` | — | Required as `Authorization: Bearer <key>` when set; unset leaves the API open (see Access) |
+| `BOARD_CONSOLE_CORS_ORIGINS` | `http://localhost:5173` | Browser origins allowed to call the API, comma-separated |
+| `SCHEDULE_CAPACITY` | `2` | How many scheduled crawls run at once; a time holding this many runs is booked |
+| `DOCKER_PROXY_URL` | — (compose sets `http://docker-proxy:2375`) | Docker access for the build-cache figure and prune; empty turns it off |
+| `OPENAI_API_KEY` | — | Enables **Explain this run** (`POST /runs/{id}/explain`: the run's details and log tail go to the model with a built-in briefing on this tool). Set it in `.env`, never in a committed file; unset makes the endpoint answer 503 |
 | `OPENAI_MODEL` | `gpt-4o-mini` | The model that writes the explanation |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | Any OpenAI-compatible `/chat/completions` endpoint |
 
+## API
+
+JSON in and out; every error is `{"error": "…"}` with its status (400, 404,
+409 for "already running", 422 for a validation failure, 503). Times of day
+are minutes after 00:00 UTC; instants are RFC 3339.
+
+| Method and path | What it does |
+|---|---|
+| `GET /api/v1/meta` | Scope (`CATALOGUE_TECH_ONLY`), build, schedule capacity, kind tabs, the provider → kind map |
+| `GET /api/v1/catalog?show=all&kind=&q=&page=` | One page of providers (added only unless `show=all`), each with its schedule and last run |
+| `POST /api/v1/providers` | "+ New provider": `{provider, board, company, crawlNow}` — 201, or 422 with the message |
+| `POST /api/v1/providers/{p}/crawl` | Crawl (Add + Crawl when not fully added); `{"refetchAll": true}` for a full re-crawl — 202, or 409 |
+| `POST /api/v1/providers/{p}/remove` | Remove provider (retire its boards, drop its schedule, purge its activity) — 202, 409 or 503 |
+| `POST /api/v1/reindex` | Queue a reindex (coalesced with one already running) |
+| `GET /api/v1/schedules` | The plan: load per slot, scheduled providers (each run's latest result), added providers without a schedule, system jobs |
+| `GET /api/v1/schedules/load` | Load per 15-minute slot and the capacity, for checking a new time |
+| `PUT /api/v1/schedules` | Save a provider's schedule `{id?, provider, times}` (one per provider: an existing one is updated) |
+| `POST /api/v1/schedules/{id}/toggle` · `DELETE /api/v1/schedules/{id}` | Pause/resume · delete |
+| `POST /api/v1/system-jobs/{key}/toggle` · `PUT …/time {minute}` · `POST …/run` | A system job (`cleanup`, `recount`): pause/resume, re-time, run now |
+| `GET /api/v1/activity?view=cleanup&status=&action=&provider=&page=` | Jobs with their steps, paged (25), plus the cleanup's last and next run |
+| `GET /api/v1/runs/{id}` · `POST /api/v1/runs/{id}/explain` | One run's log (and a cached explanation) · ask the model about it |
+| `POST /api/v1/cleanup/preview` · `POST /api/v1/cleanup/run` | Dead-board cleanup: dry run · for real |
+| `POST /api/v1/companies/refresh` | Recount companies |
+| `GET /api/v1/system/stats` · `POST /api/v1/system/build-cache/prune` | Disk, memory, CPU, jobs running, Docker build cache · clear it |
+
 ## Behaviour notes
 
-- **"+ New provider" fields follow the Kind selected**: an ATS platform
-  needs Provider + Board + Company (many companies per platform, each with
-  its own board); an Aggregator needs Provider only — Board is forced
-  blank and Company is auto-derived from the provider slug (`remoteok` →
-  `Remoteok`, imperfect by design, hand-fixable in the CSV afterward), and
-  it always crawls immediately since there's no meaningful "add without
-  crawling" step for a single feed; a Career site needs Provider + Company
-  — Board is forced blank. Enforced both in the browser (field
-  show/hide) and server-side (`handleNewProvider` in
-  `handlers_catalog.go`) as a fallback if JS didn't run.
-- **Reindex batching**: a single-row Crawl reindexes once, immediately
-  after. A scheduled run with multiple providers (via `RunBatch`) ingests
-  each one sequentially and reindexes **once**, at the end — never once
-  per provider.
+- **"+ New provider" fields follow the kind**: an ATS platform needs
+  provider + board + company (many companies per platform, each with its
+  own board); an Aggregator needs the provider only — board is forced blank
+  and company is derived from the provider slug (`remoteok` → `Remoteok`,
+  imperfect by design, hand-fixable in the CSV afterward), and it always
+  crawls immediately, there being no "add without crawling" step for a
+  single feed; a Career site needs provider + company — board is forced
+  blank. Enforced server-side (`addProviderRow`), whatever the caller sent.
 - **Concurrency is per-purpose, not one global lock** (`runner.go`):
   `ingest` is bounded by a semaphore (`maxConcurrentIngest`, 4 at once,
   across every caller) — different providers genuinely crawl in parallel,
-  and a click that arrives once all 4 slots are busy still gets its own
-  Activity row immediately, shown as **`queued`** until a slot frees up,
-  rather than looking silently dropped (the previous single global mutex's
-  failure mode). `reindex` is a full-catalog operation, so it stays
-  serialized instead — but *coalesced*, not blocking: a request that
-  arrives while one is already running is satisfied by one extra run right
-  after the current one finishes, never by stacking a redundant second run
-  or by the caller waiting for it. `add-boards` has no limit of its own —
-  fast, scoped to one provider, and (since it no longer writes to the CSV)
-  nothing to race on.
+  and a request that arrives once all 4 slots are busy still gets its own
+  activity run at once, shown as **`queued`** until a slot frees up. One
+  provider is never crawled twice at once (a second request is a 409).
+  `reindex` is a full-catalog operation, so it stays serialized instead —
+  but *coalesced*, not blocking: a request that arrives while one is already
+  running is satisfied by one extra run right after the current one
+  finishes. A single crawl reindexes once, immediately after.
 - **Schedules run at the times you set**: a provider has one schedule, a
-  list of run times picked one by one in the modal ("+ Add time": an hour
-  and a minute on the 15-minute grid, in the viewer's timezone, stored as
-  minutes after 00:00 UTC). It crawls once at each, every day, and nothing
-  moves those times. A time already holding `SCHEDULE_CAPACITY` (default 2)
-  runs is **booked**: the modal warns, but lets you pick it anyway. At run
-  time the scheduler starts due runs oldest first only while fewer than
-  `SCHEDULE_CAPACITY` crawls (from any source) are in flight; the rest show
-  as "queued" and start on the first tick after a crawl ends. Every run is
-  one 15-minute block: nothing guesses how long a crawl takes. A new or
-  re-timed schedule first runs at its NEXT time. A run is skipped when a
-  good crawl of the provider (from any source) ended within 15 minutes
-  before it; after downtime only the latest missed run happens, once.
-  Scheduled crawls don't reindex one by one: the first tick of each hour
-  runs ONE reindex for all of them (a shared step of each crawl's job in
-  Activity). The Schedules page draws the day as a 24-hour timeline in the
-  viewer's timezone, sorted by first run, with a load strip and a "now"
-  line; the card folds to a one-line summary (remembered per browser).
-  Older `schedule.json` files are converted on load, and written back:
-  "every N" becomes the nearest crawls-per-day from its last run's time,
-  "N a day from a first run" becomes those N times, and several schedules
-  of one provider merge into one.
+  list of daily run times on the 15-minute grid (stored as minutes after
+  00:00 UTC). It crawls once at each, every day, and nothing moves those
+  times. A time already holding `SCHEDULE_CAPACITY` (default 2) runs is
+  **booked** — a warning, not a refusal. At run time the scheduler starts due
+  runs oldest first only while fewer than `SCHEDULE_CAPACITY` crawls (from
+  any source) are in flight; the rest are "queued" and start on the first
+  tick after a crawl ends. Every run is one 15-minute slot: nothing guesses
+  how long a crawl takes. A new or re-timed schedule first runs at its NEXT
+  time. A run is skipped when a good crawl of the provider (from any source)
+  ended within 15 minutes before it; after downtime only the latest missed
+  run happens, once. Scheduled crawls don't reindex one by one: the first
+  tick of each hour runs ONE reindex for all of them (a shared step of each
+  crawl's job). Each planned run carries the result of the crawl that served
+  its latest occurrence, and that run's id. Older `schedule.json` files are
+  converted on load, and written back: "every N" becomes the nearest
+  crawls-per-day from its last run's time, "N a day from a first run"
+  becomes those N times, and several schedules of one provider merge into
+  one.
 - **Activity log**: the last 500 runs, backed by `data/activity.jsonl` — a
   working log, not an audit trail (it's trimmed and only throttled-persisted
   while a run is in progress, so a crash can lose the last few seconds of a
-  still-running command's output). Survives a restart.
-- **Live logs**: a run's stdout/stderr streams into the Activity page while
-  it's still going — expand a row to watch it grow, polled every 2s.
-- **Activity lists jobs, not runs** (`jobs.go`): one row per thing asked
+  still-running command's output). Survives a restart. A run's output grows
+  live while it runs (`GET /runs/{id}`).
+- **Activity lists jobs, not runs** (`jobs.go`): one entry per thing asked
   for — a Crawl (add-boards → ingest → reindex), a Cleanup (close-chronic-
-  boards → reindex → recount → reindex-companies), a Reindex, … — opened to
-  show its steps, each with its log. Every run records its job(s) (`Run.Jobs`);
-  a reindex that served several crawls at once belongs to each and says
+  boards → reindex → recount → reindex-companies), a Reindex, … — with its
+  steps, each with its log. Every run records its job(s) (`Run.Jobs`); a
+  reindex that served several crawls at once belongs to each and says
   "shared with …". The main step decides the job's status; a later step
   that failed makes it partial ("… · reindex failed"). Runs recorded before
-  jobs existed show as single-step jobs.
-- **Activity filters and pages**: status/action/provider and `page` (25
-  jobs a page), as query params on `/activity` — all of them on JOBS (the
-  action filter means "has a step of that action"). The live-poll endpoint
-  returns the same page with a fingerprint; the table re-renders only when
-  it moves, and otherwise patches durations and open logs in place. When
-  the set of runs on the page changes, the table re-renders in place with
-  expanded rows kept open. A "Reindex now" button sits in the header.
-- **Catalog is also the providers view**: each row joins the three stores —
-  how fully the provider is added, its schedule if any (next run,
-  paused), and its most recent activity run. It opens on "Added" —
-  providers with at least one added board, what the old Providers page
-  showed (`/providers` redirects there) — and "All" (`?show=all`) widens it
-  to the whole catalog.
-- **Search**: multi-word, order-independent — every word must appear
-  somewhere across the provider and company text, so "green house" matches
-  "Greenhouse" as readily as "greenhouse" does.
+  jobs existed show as single-step jobs. Filters (status, action, provider)
+  all apply to JOBS — the action filter means "has a step of that action".
+- **The catalog** joins the three stores per provider — how fully it is
+  added, its schedule if any, and its most recent run. It defaults to the
+  added providers (at least one board added); `show=all` widens it to the
+  whole catalog. **Search** is multi-word and order-independent: every word
+  must appear somewhere across the provider and company text, so
+  "green house" matches "Greenhouse".
 - **Already-added providers only ever get crawled, never re-added** — the
   "fully added" check (`CSVStore.FullyAddedProviders`, `Runner.FullyAdded`)
   requires every one of a provider's candidate rows to be added, not just
-  one; a fix from when this still read the CSV, now carried over to the
-  live DB read.
-- **Schedules support edit and delete, not just add** — one modal handles
-  both (`POST /schedules/save`: a provider that already has a schedule gets
-  it updated in place, otherwise one is created), reachable either from
-  the Schedules page's own kebab menu or from Catalog's. `POST
-  /schedules/delete` removes one; the confirmation is a plain
-  `confirm()` (the form's `data-confirm`), no custom dialog needed for
-  something reversible by re-adding.
-- **Catalog's row actions are a kebab (⋮) menu**, not separate buttons:
-  Crawl/Add+Crawl, Reindex now, and Add/Edit/Delete schedule (whichever
-  apply). One delegated click listener (`app.js`) opens/closes every
-  menu on the page — clicking a toggle opens its own menu and closes every
-  other one; clicking anywhere else closes all of them.
-- **System jobs** are Board Console's own daily chores, listed after the
-  providers on the Schedules page under a "System" line: the **Dead-board
+  one.
+- **System jobs** are Board Console's own daily chores: the **dead-board
   cleanup** (`close-chronic-boards --apply`, then reindex and recount) and
-  **Recount companies** (`recount-companies`, then `reindex-companies`).
-  Each has a toggle and a ⋮ menu to re-time it ("Change time…", 15-minute
-  grid, your timezone), run it now, or open its runs in Activity. They live in `data/system.json`; a run started by hand
-  counts as the day's run, and a re-timed or resumed job waits for its next
-  time rather than firing at once. Their squares on the timeline are round
-  and coloured by the last run; they never count toward the Load row.
-- **The sidebar's Server card** shows the host's disk, memory and CPU
-  (from `/proc` and `statfs` — inside Docker these describe the host), polled
-  every 5s from `GET /system/stats`, amber from 75% and red from 90%. The Disk
-  meter warns when free space is below `REINDEX_MIN_FREE_GB`, since a reindex
-  would refuse to run. It also shows Docker's build cache — the usual reason a
-  small catalogue fills the disk — with a **Clear build cache** button
-  (`docker builder prune -af`, recorded as an Activity job). Docker is reached
-  only through the compose file's `docker-proxy` (tecnativa/docker-socket-proxy),
-  which allows just `/system/df` and `/build`; board-console never holds the raw
-  socket. `DOCKER_PROXY_URL` empty turns the build-cache part off.
+  **recount companies** (`recount-companies`, then `reindex-companies`).
+  Each can be paused, re-timed (15-minute grid) and run now. They live in
+  `data/system.json`; a run started by hand counts as the day's run, and a
+  re-timed or resumed job waits for its next time rather than firing at
+  once. They never count toward the schedule load.
+- **Server stats** (`/system/stats`): the host's disk, memory and CPU (from
+  `/proc` and `statfs` — inside Docker these describe the host), how many
+  jobs are running, the reindex disk floor (`REINDEX_MIN_FREE_GB`), and
+  Docker's build cache — the usual reason a small catalogue fills the disk —
+  which `/system/build-cache/prune` clears (`docker builder prune -af`,
+  recorded as an activity job). Docker is reached only through the compose
+  file's `docker-proxy` (tecnativa/docker-socket-proxy), which allows just
+  `/system/df` and `/build`; board-console never holds the raw socket.
 - **Remove provider** retires every live board of the provider through
-  `add-board --retire` (rows kept, jobs untouched) and deletes its
-  schedule. Once every board is retired it also purges the provider's runs
-  from the activity log — in memory and in `data/activity.jsonl` — and
-  their cached explanations, so nothing about it lingers on Catalog,
-  Schedules or Activity. A removal that could not retire every board
-  purges nothing: its log stays to show what failed.
+  `add-board --retire` (rows kept, jobs untouched) and deletes its schedule.
+  Once every board is retired it also purges the provider's runs from the
+  activity log — in memory and in `data/activity.jsonl` — and their cached
+  explanations. A removal that could not retire every board purges nothing:
+  its log stays to show what failed.
 - Subprocess calls run with a 30-minute timeout so a hung command can't
   block the server indefinitely, while still allowing a genuinely slow
   crawl to finish.

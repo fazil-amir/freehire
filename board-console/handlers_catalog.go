@@ -1,9 +1,7 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"html/template"
 	"log"
 	"net/http"
 	"sort"
@@ -24,9 +22,9 @@ type ProviderSummary struct {
 	AddedCount   int
 
 	HasSchedule     bool
-	ScheduleID      string // for the kebab menu's edit/delete items
+	ScheduleID      string
 	ScheduleEnabled bool
-	ScheduleTimes   []int // its runs, minutes after 00:00 UTC (for the Edit modal)
+	ScheduleTimes   []int // its runs, minutes after 00:00 UTC
 	NextRun         time.Time
 
 	LastRunAt      time.Time
@@ -42,11 +40,6 @@ type ProviderSummary struct {
 	// (Runner.Crawling) — before its first Activity row exists — so the row
 	// shows it the moment the click lands.
 	Crawling bool
-}
-
-func (p ProviderSummary) FullyAdded() bool { return p.AddedCount == p.CompanyCount }
-func (p ProviderSummary) PartiallyAdded() bool {
-	return p.AddedCount > 0 && p.AddedCount < p.CompanyCount
 }
 
 // buildCatalog groups rows by provider, after filtering rows whose provider
@@ -136,9 +129,8 @@ func rowMatchesSearch(row BoardRow, terms []string) bool {
 	return true
 }
 
-// newProviderForm is the "+ New provider" modal's field values — round-
-// tripped back into the template on a validation failure so nothing the
-// operator typed is lost.
+// newProviderForm is a "+ New provider" request's fields; addProviderRow
+// returns it as applied (the kind's field rules filled in).
 type newProviderForm struct {
 	Kind     string
 	Provider string
@@ -160,8 +152,8 @@ var kindTabsList = []kindTab{
 	{KindUnclassified, "Unclassified"},
 }
 
-type catalogPageData struct {
-	Active     string
+// catalogPage is one page of the Catalog, as the API serves it.
+type catalogPage struct {
 	Providers  []ProviderSummary
 	KindFilter string
 	AddedOnly  bool // the default view (added providers only); ?show=all widens it to the whole catalog
@@ -169,25 +161,15 @@ type catalogPageData struct {
 	Page       int
 	TotalPages int
 	Total      int
-	KindTabs   []kindTab
 	DBError    string // set when added status fell back to the CSV's stale column
-
-	// "+ New provider" modal state.
-	NewProviderKinds     []string
-	ProviderKindsJSON    template.JS
-	NewProviderForm      newProviderForm
-	NewProviderError     string
-	OpenNewProviderModal bool
-
-	ScheduleModal scheduleModal
+	// AddedProviders are the providers with at least one added board — the
+	// ones a schedule can be made for.
+	AddedProviders []string
 }
 
-// buildCatalogPageData assembles everything the catalog template needs from
-// the request's query params and the current CSV state. Both handleCatalog
-// and handleNewProvider's error path render from this, so a failed "+ New
-// provider" submit re-renders the full page — table, filters, pagination —
-// exactly as it was, with only the modal's own state added on top.
-func buildCatalogPageData(app *App, r *http.Request) catalogPageData {
+// buildCatalogPage assembles one page of the Catalog from the request's
+// query params (?show=all, ?kind=, ?q=, ?page=) and the current CSV state.
+func buildCatalogPage(app *App, r *http.Request) catalogPage {
 	q := r.URL.Query()
 	kindFilter := q.Get("kind")
 	// Added is the default; only ?show=all widens to the whole catalog (so an
@@ -224,32 +206,29 @@ func buildCatalogPageData(app *App, r *http.Request) catalogPageData {
 	pageRows := all[start:end]
 	attachRunState(app, pageRows)
 
-	// The schedule modal's dropdown offers the added providers; a kebab
-	// item for any other opens it with that provider added to the list.
-	var addedProviders []string
+	return catalogPage{
+		Providers:      pageRows,
+		KindFilter:     kindFilter,
+		AddedOnly:      addedOnly,
+		Query:          query,
+		Page:           page,
+		TotalPages:     totalPages,
+		Total:          total,
+		DBError:        dbError,
+		AddedProviders: addedProviders(addedCounts),
+	}
+}
+
+// addedProviders are the providers with at least one added board, sorted.
+func addedProviders(addedCounts map[string]int) []string {
+	out := []string{}
 	for p, n := range addedCounts {
 		if n > 0 {
-			addedProviders = append(addedProviders, p)
+			out = append(out, p)
 		}
 	}
-	sort.Strings(addedProviders)
-
-	knownProviders := app.csv.DistinctProviders()
-	return catalogPageData{
-		Active:            "catalog",
-		Providers:         pageRows,
-		KindFilter:        kindFilter,
-		AddedOnly:         addedOnly,
-		Query:             query,
-		Page:              page,
-		TotalPages:        totalPages,
-		Total:             total,
-		KindTabs:          kindTabsList,
-		DBError:           dbError,
-		NewProviderKinds:  []string{KindATS, KindAggregator, KindCareerSite},
-		ProviderKindsJSON: providerKindsJSON(knownProviders),
-		ScheduleModal:     newScheduleModal(addedProviders),
-	}
+	sort.Strings(out)
+	return out
 }
 
 func keepAdded(all []ProviderSummary) []ProviderSummary {
@@ -336,86 +315,12 @@ func agoText(d time.Duration) string {
 	}
 }
 
-func handleCatalog(app *App) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		app.tmpl.Render(w, "catalog", buildCatalogPageData(app, r))
-	}
-}
-
-// handleCatalogResults serves the real-time search fragment: app.js fetches
-// this on every keystroke (debounced) and swaps #catalog-results in place,
-// so results update as you type without a full page reload or a Search
-// button. It shares buildCatalogPageData with the full-page handler, so a
-// search result is byte-identical whether it arrived via fragment or via a
-// full navigation (e.g. Enter, a bookmarked URL, or JS being unavailable).
-func handleCatalogResults(app *App) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		app.tmpl.Render(w, "catalog-results", buildCatalogPageData(app, r))
-	}
-}
-
-// handleCrawl is the single-row action: "Crawl" for an already-added
-// provider, "Add + Crawl" for one that isn't. It kicks the run off in the
-// background (a Greenhouse-sized crawl can run tens of minutes) and leaves
-// the operator where they clicked — Activity is there if they want to watch.
-func handleCrawl(app *App) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, "bad form", http.StatusBadRequest)
-			return
-		}
-		provider := r.FormValue("provider")
-		if provider == "" {
-			http.Error(w, "provider required", http.StatusBadRequest)
-			return
-		}
-		refetchAll := r.FormValue("refetch") == "1"
-		if !app.runner.StartCrawl(provider, true, refetchAll, nil) {
-			if isFetch(r) {
-				actionError(w, http.StatusConflict, provider+" is already being crawled — see Activity.")
-				return
-			}
-		}
-		actionDone(w, r, "/")
-	}
-}
-
-// handleReindexNow is the "Reindex now" kebab-menu action: triggers just
-// the reindex step, coalesced the same way a Crawl's trailing reindex is —
-// if one's already running, this request rides along on one extra run
-// right after it, rather than starting a redundant second one.
-func handleReindexNow(app *App) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		app.runner.queueReindex(app.activity.NewJob())
-		actionDone(w, r, "/")
-	}
-}
-
-// handleRemoveProvider is the Catalog menu's "Remove provider": retire all
-// of the provider's live boards (see Runner.StartRemoveProvider), drop its
-// schedule and, once every board is retired, purge its activity. The board list comes from the database, so it is refused
-// when that is unreachable rather than retiring only what the CSV knows.
-func handleRemoveProvider(app *App) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		provider := r.FormValue("provider")
-		if provider == "" {
-			http.Error(w, "provider required", http.StatusBadRequest)
-			return
-		}
-		if status, msg := startRemoveProvider(app, r, provider); status != 0 {
-			actionError(w, status, msg)
-			return
-		}
-		actionDone(w, r, "/")
-	}
-}
-
 // startRemoveProvider retires provider's live boards, drops its schedule
 // and, once every board is retired, purges its activity (see
 // Runner.StartRemoveProvider). The board list comes from the database, so
 // it is refused when that is unreachable rather than retiring only what the
 // CSV knows. A refusal returns its HTTP status and message; 0 means it
-// started. Shared by the page and the API.
+// started.
 func startRemoveProvider(app *App, r *http.Request, provider string) (int, string) {
 	if app.db == nil {
 		return http.StatusServiceUnavailable, "The database is not configured, so the boards to retire are unknown."
@@ -442,75 +347,10 @@ func startRemoveProvider(app *App, r *http.Request, provider string) (int, strin
 	return 0, ""
 }
 
-// handleCompanyRefresh is the "Recount companies" button: company job
-// counts and facets, then company search. Refused with a 409 while one is
-// already running.
-func handleCompanyRefresh(app *App) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if !app.runner.StartCompanyRefresh() {
-			if isFetch(r) {
-				actionError(w, http.StatusConflict, "A company recount is already running.")
-				return
-			}
-		}
-		actionDone(w, r, "/activity")
-	}
-}
-
-// handleBulkCrawl is "Add + Crawl Selected": one batch, one reindex at the
-// end, covering every checked provider.
-func handleBulkCrawl(app *App) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, "bad form", http.StatusBadRequest)
-			return
-		}
-		providers := r.Form["provider"]
-		if len(providers) == 0 {
-			actionDone(w, r, "/")
-			return
-		}
-		go func() {
-			_ = app.runner.RunBatch(providers, true)
-		}()
-		actionDone(w, r, "/")
-	}
-}
-
-// handleNewProvider is the "+ New provider" form: appends a row directly to
-// the CSV (no DB call), optionally kicking off add+crawl for it. On a
-// validation failure it re-renders the catalog page with the modal open and
-// everything the operator typed still in place, rather than redirecting and
-// losing it.
-func handleNewProvider(app *App) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, "bad form", http.StatusBadRequest)
-			return
-		}
-		form, errMsg := addProviderRow(app, newProviderForm{
-			Provider: r.FormValue("provider"),
-			Board:    r.FormValue("board"),
-			Company:  r.FormValue("company"),
-			CrawlNow: r.FormValue("crawl_now") == "on",
-		})
-		if errMsg != "" {
-			data := buildCatalogPageData(app, r)
-			data.NewProviderForm = form
-			data.NewProviderError = errMsg
-			data.OpenNewProviderModal = true
-			app.tmpl.Render(w, "catalog", data)
-			return
-		}
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-	}
-}
-
-// addProviderRow is "+ New provider": it validates the form (applying the
-// kind's field rules), appends the row to the CSV (no DB call) and, when
-// asked, starts add + crawl for it. It returns the form as applied and, on
-// a validation or save failure, the message to show. Shared by the page's
-// form and the API.
+// addProviderRow is "+ New provider": it validates the request (applying
+// the kind's field rules), appends the row to the CSV (no DB call) and,
+// when asked, starts add + crawl for it. It returns the fields as applied
+// and, on a validation or save failure, the message to show.
 func addProviderRow(app *App, form newProviderForm) (newProviderForm, string) {
 	knownProviders := app.csv.DistinctProviders()
 	known := false
@@ -524,12 +364,10 @@ func addProviderRow(app *App, form newProviderForm) (newProviderForm, string) {
 		form.Kind = kindOf(form.Provider)
 	}
 
-	// Kind-driven field rules, applied server-side as a fallback in case
-	// the client (whose JS hides/auto-fills these fields — see
-	// catalog.html and app.js) didn't run: an Aggregator is a single
-	// feed, not a per-company entry, so it never carries a board and
-	// its company name is derived rather than typed; a Career site is
-	// always boardless.
+	// Kind-driven field rules, whatever the caller sent (a UI hides these
+	// fields, but the rule lives here): an Aggregator is a single feed,
+	// not a per-company entry, so it never carries a board and its company
+	// name is derived rather than typed; a Career site is always boardless.
 	switch form.Kind {
 	case KindAggregator:
 		form.Board = ""
@@ -566,21 +404,6 @@ func addProviderRow(app *App, form newProviderForm) (newProviderForm, string) {
 		app.runner.StartCrawl(form.Provider, true, false, nil)
 	}
 	return form, ""
-}
-
-// providerKindsJSON builds the provider -> kind map the "+ New provider"
-// modal's JS uses to filter the provider input as the kind selector
-// changes, without a page reload.
-func providerKindsJSON(providers []string) template.JS {
-	m := make(map[string]string, len(providers))
-	for _, p := range providers {
-		m[p] = kindOf(p)
-	}
-	b, err := json.Marshal(m)
-	if err != nil {
-		return "{}"
-	}
-	return template.JS(b)
 }
 
 // boardSuffix names the board in the duplicate-row message, when there is

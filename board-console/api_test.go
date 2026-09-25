@@ -15,9 +15,9 @@ func newAPITestServer(t *testing.T) (*httptest.Server, *App) {
 	t.Helper()
 	sched, store, activity := newTestScheduler(t)
 	app := &App{
-		tmpl: LoadTemplates(), csv: sched.runner.csv, activity: activity, schedules: store,
+		csv: sched.runner.csv, activity: activity, schedules: store,
 		runner: sched.runner, system: sched.runner.system, explainer: NewExplainerFromEnv(),
-		sessions: NewSessionStore(), docker: &DockerProxy{}, cpu: &CPUSampler{}, dataDir: t.TempDir(),
+		docker: &DockerProxy{}, cpu: &CPUSampler{}, dataDir: t.TempDir(),
 	}
 	mux := http.NewServeMux()
 	registerAPI(mux, app)
@@ -69,6 +69,24 @@ func TestAPI_KeyAndCORS(t *testing.T) {
 	resp, _ = apiDo(t, "GET", srv.URL+"/api/v1/meta", "", map[string]string{"Authorization": "Bearer s3cret", "Origin": "https://evil.example"})
 	if resp.Header.Get("Access-Control-Allow-Origin") != "" {
 		t.Error("a foreign origin must not be allowed")
+	}
+}
+
+// Several origins — a laptop's dev server and the deployed app — share one API;
+// spaces and a trailing slash in the list are forgiven.
+func TestAPI_CORSMultipleOrigins(t *testing.T) {
+	t.Setenv("BOARD_CONSOLE_CORS_ORIGINS", "http://localhost:5173, http://1.2.3.4:5173/")
+	srv, _ := newAPITestServer(t)
+
+	for _, origin := range []string{"http://localhost:5173", "http://1.2.3.4:5173"} {
+		resp, _ := apiDo(t, "GET", srv.URL+"/api/v1/meta", "", map[string]string{"Origin": origin})
+		if got := resp.Header.Get("Access-Control-Allow-Origin"); got != origin {
+			t.Errorf("origin %s: allowed %q, want it echoed", origin, got)
+		}
+	}
+	resp, _ := apiDo(t, "GET", srv.URL+"/api/v1/meta", "", map[string]string{"Origin": "http://1.2.3.4:8080"})
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "" {
+		t.Errorf("unlisted origin allowed: %q", got)
 	}
 }
 

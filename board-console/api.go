@@ -5,16 +5,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
-	"sort"
 	"strings"
 	"time"
 )
 
-// The JSON API a separate UI drives Board Console through (/api/v1). It sits
-// beside the HTML pages, over the same engine — runner, scheduler, stores —
-// and the same handler helpers, so a page and its API answer alike. It has
-// no login of its own: a caller is trusted by an optional shared key and,
-// from a browser, by an allowed origin (apiMiddleware).
+// The JSON API — Board Console's only interface (/api/v1). A separate UI
+// drives it; there are no pages here. It has no login of its own: a caller
+// is trusted by an optional shared key and, from a browser, by an allowed
+// origin (apiMiddleware) — so set the key anywhere the port is reachable.
 
 // apiMiddleware guards every /api/v1 route:
 //   - BOARD_CONSOLE_API_KEY set: a request needs "Authorization: Bearer
@@ -22,7 +20,9 @@ import (
 //     development; never expose it publicly that way.
 //   - BOARD_CONSOLE_CORS_ORIGINS (comma list, default the Vite dev server,
 //     http://localhost:5173): a browser on one of them may call it, and its
-//     preflight OPTIONS is answered here.
+//     preflight OPTIONS is answered here. List every place a UI runs from —
+//     e.g. a laptop's dev server and the deployed app — so both can reach the
+//     same API.
 func apiMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	key := os.Getenv("BOARD_CONSOLE_API_KEY")
 	origins := map[string]bool{}
@@ -71,6 +71,14 @@ func registerAPI(mux *http.ServeMux, app *App) {
 	api("GET /api/v1/system/stats", handleSystemStats(app))
 	api("POST /api/v1/system/build-cache/prune", handleBuildCachePrune(app))
 	registerPageAPI(api, app)
+}
+
+// actionError answers a refused request with {"error": msg} — a 422 for a
+// validation failure, a 409 for a conflict, and so on.
+func actionError(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -177,12 +185,12 @@ func toAPIProvider(p ProviderSummary) apiProvider {
 	return out
 }
 
-// handleAPICatalog is the Catalog page's table: ?show=all (else added
-// only), ?kind=, ?q=, ?page= — the same filters, paging and figures the
-// page renders, from the same buildCatalogPageData.
+// handleAPICatalog is the Catalog: ?show=all (else added only), ?kind=,
+// ?q=, ?page= — one page of providers with their schedule and last run
+// (buildCatalogPage).
 func handleAPICatalog(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		d := buildCatalogPageData(app, r)
+		d := buildCatalogPage(app, r)
 		providers := make([]apiProvider, 0, len(d.Providers))
 		for _, p := range d.Providers {
 			providers = append(providers, toAPIProvider(p))
@@ -196,17 +204,9 @@ func handleAPICatalog(app *App) http.HandlerFunc {
 			"kind":           d.KindFilter,
 			"q":              d.Query,
 			"dbError":        d.DBError,
-			"addedProviders": addedProviderNames(d.ScheduleModal),
+			"addedProviders": d.AddedProviders,
 		})
 	}
-}
-
-// addedProviderNames is the schedule modal's provider list: the providers
-// with at least one added board, as the page's modal offers them.
-func addedProviderNames(m scheduleModal) []string {
-	out := append([]string{}, m.Providers...)
-	sort.Strings(out)
-	return out
 }
 
 // --- providers ---
@@ -279,7 +279,7 @@ func handleAPIReindex(app *App) http.HandlerFunc {
 
 // --- schedules ---
 
-// handleAPISaveSchedule is the schedule modal's save: {id?, provider,
+// handleAPISaveSchedule saves a schedule: {id?, provider,
 // times} with times in minutes after 00:00 UTC. A provider has one
 // schedule, so saving for one that already has a schedule updates it.
 func handleAPISaveSchedule(app *App) http.HandlerFunc {

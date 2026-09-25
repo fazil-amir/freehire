@@ -1,6 +1,7 @@
-// Command board-console is a standalone internal ops tool for managing
+// Command board-console is a standalone internal ops service for managing
 // which ATS/aggregator/career-site "boards" get added to freehire's catalog
-// and crawled. It has no code-level relationship to freehire: it never
+// and crawled. It has no UI of its own: it serves a JSON API (/api/v1, see
+// api.go) that a separate UI drives. It has no code-level relationship to freehire: it never
 // imports freehire's internal packages. The only WRITE interaction with
 // freehire is running its already-built worker binaries (bulk-add-boards,
 // ingest, reindex) as local subprocesses — they are copied into this image
@@ -20,14 +21,12 @@ import (
 
 // App wires together every piece the HTTP handlers need.
 type App struct {
-	tmpl      *Templates
 	csv       *CSVStore
 	activity  *ActivityLog
 	schedules *ScheduleStore
 	runner    *Runner
 	system    *SystemStore
 	explainer *Explainer
-	sessions  *SessionStore
 	db        *DBStore // nil when DATABASE_URL is unset or the open failed — every reader falls back gracefully
 	docker    *DockerProxy
 	cpu       *CPUSampler
@@ -89,14 +88,12 @@ func main() {
 	go cpu.Run(5*time.Second, stop)
 
 	app := &App{
-		tmpl:      LoadTemplates(),
 		csv:       csvStore,
 		activity:  activity,
 		schedules: scheduleStore,
 		runner:    runner,
 		system:    systemStore,
 		explainer: NewExplainerFromEnv(),
-		sessions:  NewSessionStore(),
 		db:        dbStore,
 		docker:    NewDockerProxyFromEnv(),
 		cpu:       cpu,
@@ -104,45 +101,12 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	// The JSON API a separate UI drives (api.go): its own key and CORS, no
-	// session login.
+	// Everything is the JSON API (api.go): its own key and CORS. The root
+	// says where it is, for anyone who opens the port in a browser.
 	registerAPI(mux, app)
-
-	mux.HandleFunc("GET /login", handleLoginPage(app.tmpl))
-	mux.HandleFunc("POST /login", handleLoginSubmit(app.sessions))
-	mux.HandleFunc("POST /logout", handleLogout(app.sessions))
-
-	mux.HandleFunc("GET /{$}", requireAuth(app.sessions, handleCatalog(app)))
-	mux.HandleFunc("GET /catalog/results", requireAuth(app.sessions, handleCatalogResults(app)))
-	mux.HandleFunc("POST /crawl", requireAuth(app.sessions, handleCrawl(app)))
-	mux.HandleFunc("POST /reindex", requireAuth(app.sessions, handleReindexNow(app)))
-	mux.HandleFunc("POST /providers/remove", requireAuth(app.sessions, handleRemoveProvider(app)))
-	mux.HandleFunc("POST /companies/refresh", requireAuth(app.sessions, handleCompanyRefresh(app)))
-	mux.HandleFunc("POST /bulk", requireAuth(app.sessions, handleBulkCrawl(app)))
-	mux.HandleFunc("POST /new-provider", requireAuth(app.sessions, handleNewProvider(app)))
-
-	// Providers was merged into Catalog as its "Added" view — now the
-	// default — and the old URL keeps working for bookmarks.
-	mux.Handle("GET /providers", http.RedirectHandler("/", http.StatusMovedPermanently))
-
-	mux.HandleFunc("GET /schedules", requireAuth(app.sessions, handleSchedules(app)))
-	mux.HandleFunc("POST /schedules/save", requireAuth(app.sessions, handleScheduleSave(app)))
-	mux.HandleFunc("GET /schedules/load", requireAuth(app.sessions, handleScheduleLoad(app)))
-	mux.HandleFunc("POST /schedules/delete", requireAuth(app.sessions, handleScheduleDelete(app)))
-	mux.HandleFunc("POST /schedules/toggle", requireAuth(app.sessions, handleScheduleToggle(app)))
-
-	mux.HandleFunc("GET /schedules/run", requireAuth(app.sessions, handleScheduleRun(app)))
-	mux.HandleFunc("POST /system-jobs/toggle", requireAuth(app.sessions, handleSystemToggle(app)))
-	mux.HandleFunc("POST /system-jobs/time", requireAuth(app.sessions, handleSystemTime(app)))
-	mux.HandleFunc("GET /system/stats", requireAuth(app.sessions, handleSystemStats(app)))
-	mux.HandleFunc("POST /system/build-cache/prune", requireAuth(app.sessions, handleBuildCachePrune(app)))
-	mux.HandleFunc("GET /activity", requireAuth(app.sessions, handleActivity(app)))
-	mux.HandleFunc("GET /activity/status", requireAuth(app.sessions, handleActivityStatus(app)))
-	mux.HandleFunc("POST /activity/explain", requireAuth(app.sessions, handleExplain(app)))
-	mux.HandleFunc("POST /cleanup/preview", requireAuth(app.sessions, handleCleanup(app, false)))
-	mux.HandleFunc("POST /cleanup/run", requireAuth(app.sessions, handleCleanup(app, true)))
-
-	mux.Handle("GET /static/", http.FileServerFS(staticFS))
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]string{"service": "board-console", "api": "/api/v1"})
+	})
 
 	log.Printf("board-console listening on :%s", port)
 	if err := http.ListenAndServe(":"+port, mux); err != nil {

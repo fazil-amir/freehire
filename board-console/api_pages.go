@@ -7,9 +7,8 @@ import (
 	"time"
 )
 
-// The Schedules and Activity pages' part of the JSON API (see api.go): the
-// same data the HTML pages render, from the same builders, and their
-// actions.
+// The Schedules and Activity part of the JSON API (see api.go): each view's
+// data and its actions.
 
 func registerPageAPI(api func(string, http.HandlerFunc), app *App) {
 	api("GET /api/v1/schedules", handleAPISchedules(app))
@@ -78,7 +77,7 @@ type apiSystemRow struct {
 	Key         string          `json:"key"`
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
-	ActivityURL string          `json:"activityUrl"` // its runs, as the page's own Activity link (query string included)
+	ActivityURL string          `json:"activityUrl"` // where its runs are listed: an Activity view's path and query
 	Enabled     bool            `json:"enabled"`
 	Minute      int             `json:"minute"` // its daily time, minutes after 00:00 UTC
 	Running     bool            `json:"running"`
@@ -93,7 +92,7 @@ type apiSystemRow struct {
 // same rows buildSchedulesPageData renders.
 func handleAPISchedules(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		d := buildSchedulesPageData(app, r)
+		d := buildSchedulesPage(app, r)
 		scheduled := make([]apiScheduleRow, 0, len(d.Schedules))
 		for _, s := range d.Schedules {
 			scheduled = append(scheduled, apiScheduleRow{
@@ -126,7 +125,7 @@ func handleAPISchedules(app *App) http.HandlerFunc {
 			"scheduled":      scheduled,
 			"unscheduled":    unscheduled,
 			"system":         system,
-			"addedProviders": addedProviderNames(d.ScheduleModal),
+			"addedProviders": d.AddedProviders,
 		})
 	}
 }
@@ -200,7 +199,6 @@ func handleAPISystemRun(app *App) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		// The same refusals the page's own Run now buttons give.
 		if key == sysCleanup && !app.runner.StartCleanup(true) {
 			actionError(w, http.StatusConflict, "A dead board cleanup is already running.")
 			return
@@ -293,9 +291,9 @@ type apiJob struct {
 	Steps     []apiStep `json:"steps"`
 }
 
-// handleAPIActivity is the Activity page: ?view=cleanup for the Cleanup tab,
-// ?status=, ?action=, ?provider=, ?page= — the same jobs, filters and paging
-// as the page — plus the cleanup's last and next run.
+// handleAPIActivity is the jobs list: ?view=cleanup for the cleanup jobs
+// (everything else otherwise), ?status=, ?action=, ?provider=, ?page= —
+// plus the cleanup's last and next run.
 func handleAPIActivity(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		f := filtersFromRequest(r)
