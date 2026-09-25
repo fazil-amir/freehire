@@ -102,7 +102,7 @@ func TestFindJobResolvesByIdentityAndByURL(t *testing.T) {
 
 	t.Run("aggregator page resolves by its stored URL", func(t *testing.T) {
 		// Carrying the tracking tag freehire stamps on its own outbound links.
-		const page = "https%3A%2F%2Fhimalayas.app%2Fcompanies%2Fmindera%2Fjobs%2Fstaff-java-backend-developer%3Futm_source%3Dfreehire.me"
+		const page = "https%3A%2F%2Fhimalayas.app%2Fcompanies%2Fmindera%2Fjobs%2Fstaff-java-backend-developer%3Futm_source%3Dnxtchap.ai"
 		if slug := findSlug(t, app, page); slug != "staff-java-mindera" {
 			t.Errorf("slug = %q, want staff-java-mindera", slug)
 		}
@@ -112,7 +112,7 @@ func TestFindJobResolvesByIdentityAndByURL(t *testing.T) {
 	// different URL from the one the catalog stores. Without collapsing it the panel
 	// tells them freehire does not have the posting it is showing on the page behind.
 	t.Run("an apply form resolves to its posting", func(t *testing.T) {
-		const form = "https%3A%2F%2Fjobs.ashbyhq.com%2Ftruelogic%2Fc6d2719d-3935-4e59-8446-26135d01957a%2Fapplication%3Futm_source%3Dfreehire.me"
+		const form = "https%3A%2F%2Fjobs.ashbyhq.com%2Ftruelogic%2Fc6d2719d-3935-4e59-8446-26135d01957a%2Fapplication%3Futm_source%3Dnxtchap.ai"
 		if slug := findSlug(t, app, form); slug != "senior-go-truelogic" {
 			t.Errorf("slug = %q, want senior-go-truelogic", slug)
 		}

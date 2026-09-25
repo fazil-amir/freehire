@@ -8,8 +8,15 @@ import "net/url"
 
 // utmSource is the fixed utm_source value stamped on every outbound link, mirroring
 // how the notification builders hardcode "telegram-bot"/"email" for internal links.
-// It is the canonical brand domain (freehire.me since the .dev -> .me migration).
-const utmSource = "freehire.me"
+// It is the brand the destination ATS attributes the click to.
+const utmSource = "nxtchap.ai"
+
+// legacyUTMSources are values this package stamped before, which Untag still removes.
+// A served URL is not only built fresh: the Meilisearch index stores jobview output,
+// tag included, and an incremental push never rewrites it (the URL is not part of
+// content_hash), so until a full reindex search results still carry the old value —
+// and an agent-facing consumer that untags them must not pass it through.
+var legacyUTMSources = []string{"freehire.me"}
 
 // Untag removes the utm_source this package adds, returning the URL as the source
 // published it. It exists because the tag is applied on the way OUT of jobview, so a
@@ -31,7 +38,7 @@ func Untag(tagged string) string {
 		return tagged
 	}
 	q := u.Query()
-	if q.Get("utm_source") != utmSource {
+	if !isOurs(q.Get("utm_source")) {
 		return tagged
 	}
 	q.Del("utm_source")
@@ -39,7 +46,20 @@ func Untag(tagged string) string {
 	return u.String()
 }
 
-// Tag returns raw with utm_source=freehire.me set as a query parameter. It parses
+// isOurs reports whether a utm_source value is one this package stamps, now or before.
+func isOurs(v string) bool {
+	if v == utmSource {
+		return true
+	}
+	for _, old := range legacyUTMSources {
+		if v == old {
+			return true
+		}
+	}
+	return false
+}
+
+// Tag returns raw with utm_source=nxtchap.ai set as a query parameter. It parses
 // the URL so an existing query string is preserved (the tag is appended with the
 // correct "?"/"&" separator) and any pre-existing utm_source is overwritten, keeping
 // attribution consistently ours. An empty or unparseable URL is returned unchanged

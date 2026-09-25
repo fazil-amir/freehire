@@ -137,8 +137,8 @@ func TestCanonicalPostingURL_DropsTheApplyForm(t *testing.T) {
 		},
 		{
 			name: "a query string survives — the caller's normalisation drops it",
-			url:  "https://jobs.ashbyhq.com/truelogic/c6d2719d/application?utm_source=freehire.me",
-			want: "https://jobs.ashbyhq.com/truelogic/c6d2719d?utm_source=freehire.me",
+			url:  "https://jobs.ashbyhq.com/truelogic/c6d2719d/application?utm_source=nxtchap.ai",
+			want: "https://jobs.ashbyhq.com/truelogic/c6d2719d?utm_source=nxtchap.ai",
 		},
 	}
 
