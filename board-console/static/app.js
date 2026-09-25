@@ -387,15 +387,19 @@ function drawPlan() {
 
   // Each provider's runs, coloured by how each one last went; the next
   // one is ringed.
-  function drawRuns(track, cls) {
+  // adhoc: a provider without a schedule, whose squares are the crawls
+  // started by hand — only today's (in the viewer's day) are drawn.
+  var today = new Date().toDateString();
+  function drawRuns(track, cls, adhoc) {
     track.replaceChildren();
     var next = track.dataset.next ? new Date(track.dataset.next) : null;
     var nextUTC = next ? next.getUTCHours() * 60 + next.getUTCMinutes() : -1;
     slots(track).forEach(function (x) {
+      if (adhoc && !(x.at && new Date(x.at).toDateString() === today)) return;
       var isNext = x.m === nextUTC;
       // Later today (in the viewer's day) it has not run yet: its latest
       // run was yesterday's, which this day's plan does not show.
-      if (local(x.m) > nowMin) {
+      if (!adhoc && local(x.m) > nowMin) {
         square(track, x.m, cls + " run-upcoming" + (isNext ? " next" : ""),
           track.dataset.provider + " · " + hhmm(x.m) + " — later today" + (isNext ? " (next run)" : ""));
         return;
@@ -416,6 +420,7 @@ function drawPlan() {
     if (track.hasAttribute("data-enabled")) { enabled++; perDay += times(track).length; }
   });
   table.querySelectorAll("[data-system-track]").forEach(function (track) { drawRuns(track, "tl-block sys"); });
+  table.querySelectorAll("[data-adhoc-track]").forEach(function (track) { drawRuns(track, "tl-block", true); });
 
   // Rows by their first run of the viewer's day; each keeps its log row.
   var body = table.tBodies[0];
@@ -487,22 +492,26 @@ var planFilter = { state: "", status: "", q: "" };
 function applyPlanFilters() {
   var table = document.querySelector("[data-plan]");
   if (!table) return;
-  var q = planFilter.q.toLowerCase(), shown = 0, any = false, systemShown = 0;
-  table.querySelectorAll("[data-plan-track], [data-system-track]").forEach(function (track) {
-    var system = track.hasAttribute("data-system-track");
-    if (!system) any = true;
+  var q = planFilter.q.toLowerCase(), shown = 0, any = false;
+  table.querySelectorAll("[data-plan-track], [data-system-track], [data-adhoc-track]").forEach(function (track) {
+    var scheduled = track.hasAttribute("data-plan-track");
     var row = track.closest("tr");
-    var ok = (!q || track.dataset.provider.toLowerCase().indexOf(q) !== -1) &&
-      (!planFilter.state || (planFilter.state === "enabled") === track.hasAttribute("data-enabled")) &&
+    // Enabled/Paused is a schedule's state: a provider without one is
+    // neither, so it only shows under All.
+    var state = track.hasAttribute("data-adhoc-track") ? !planFilter.state :
+      !planFilter.state || (planFilter.state === "enabled") === track.hasAttribute("data-enabled");
+    var ok = state && (!q || track.dataset.provider.toLowerCase().indexOf(q) !== -1) &&
       (!planFilter.status || track.dataset.last === planFilter.status);
     row.hidden = !ok;
-    if (system) { if (ok) systemShown++; return; }
     var detail = document.getElementById("detail-" + row.dataset.runId);
-    if (!ok && detail) detail.hidden = true; // a hidden row takes its open log with it
-    if (ok) shown++;
+    if (!ok && detail && !detail.hidden) closeSlotLog(detail); // a hidden row takes its open log with it
+    if (scheduled) { any = true; if (ok) shown++; }
   });
-  var group = table.querySelector(".plan-group");
-  if (group) group.hidden = systemShown === 0;
+  // A section's group line goes when none of its rows is left.
+  table.querySelectorAll("tbody").forEach(function (body) {
+    var group = body.querySelector(".plan-group");
+    if (group) group.hidden = !body.querySelector(".plan-row:not([hidden])");
+  });
   var nomatch = table.querySelector(".plan-nomatch");
   if (nomatch) nomatch.hidden = !any || shown > 0;
 }

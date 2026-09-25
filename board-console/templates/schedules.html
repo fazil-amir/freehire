@@ -119,6 +119,55 @@
         {{end}}
         <tr class="plan-nomatch" hidden><td colspan="4" class="muted">No schedule matches these filters.</td></tr>
       </tbody>
+      {{/* The added providers without a schedule, so the page covers the
+           whole fleet: a tbody of their own between the scheduled providers
+           and System, each with its last crawl and today's hand-started
+           crawls on the timeline (drawn by drawPlan, clickable for a log). */}}
+      {{if .Unscheduled}}
+      <tbody class="plan-unscheduled">
+        <tr class="plan-group">
+          <td colspan="4"><span class="tl-tag tl-tag-neutral">Not scheduled</span><span class="plan-group-note">Added providers — crawled only by hand</span></td>
+        </tr>
+        {{range .Unscheduled}}
+        <tr class="plan-row adhoc-row" data-run-id="adhoc-{{.Provider}}" data-patch="adhoc-{{.Provider}}" {{if .Crawling}}data-running{{end}}>
+          <td class="plan-provider">
+            <div class="plan-name">{{.Provider}}</div>
+            <div class="plan-last">
+              {{if eq .Last.Status "running"}}<span class="status-dot run-running"></span><span>crawling</span>
+              {{else if .Last.At.IsZero}}<span class="status-dot run-none"></span><span>never crawled</span>
+              {{else}}<span class="status-dot run-{{.Last.Badge}}" title="Last crawl: {{.Last.Status}}{{with .Last.Summary}} · {{.}}{{end}}"></span>{{end}}
+              {{if not .Last.At.IsZero}}<time datetime="{{iso .Last.At}}" data-local>{{.Last.At.UTC.Format "02/01/2006 - 15:04:05"}} UTC</time>{{end}}
+            </div>
+          </td>
+          <td class="plan-cell">
+            <span class="plan-now" aria-hidden="true"></span>
+            <div class="tl-track" data-adhoc-track data-provider="{{.Provider}}" data-slots="{{.Runs}}"
+                 data-last="{{if .Last.At.IsZero}}never{{else}}{{.Last.Status}}{{end}}"></div>
+          </td>
+          <td class="col-toggle">
+            <a class="btn btn-secondary btn-sm plan-add" href="/schedules?open=add&provider={{.Provider}}"
+               data-schedule-open data-provider="{{.Provider}}">+ Schedule</a>
+          </td>
+          <td class="col-actions">
+            <div class="kebab-wrap">
+              <button type="button" class="kebab-btn" data-kebab-toggle aria-label="Actions for {{.Provider}}">⋮</button>
+              <div class="kebab-menu" hidden>
+                <a class="kebab-item" href="/schedules?open=add&provider={{.Provider}}"
+                   data-schedule-open data-provider="{{.Provider}}">Add schedule</a>
+                <form method="post" action="/crawl" data-async data-refresh
+                      data-done="Crawl started for {{.Provider}}">
+                  <input type="hidden" name="provider" value="{{.Provider}}">
+                  <button type="submit" class="kebab-item">Crawl now</button>
+                </form>
+                <a class="kebab-item" href="/activity?provider={{.Provider}}">View runs in Activity</a>
+              </div>
+            </div>
+          </td>
+        </tr>
+        {{template "slot-log-row" (printf "detail-adhoc-%s" .Provider)}}
+        {{end}}
+      </tbody>
+      {{end}}
       {{/* Board Console's own daily jobs: a tbody of their own, so they stay
            after the providers however those are ordered, under a group
            line that says they are not a provider's crawls. */}}

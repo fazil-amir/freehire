@@ -975,9 +975,10 @@ code {
 }
 .slot-log-close:hover { background: var(--surface-raised); color: var(--text); }
 
-/* Board Console's own daily jobs, after the providers: a group line
-   naming them, round squares, and a gear by the name. */
-.plan-table tbody.plan-system tr.plan-group td {
+/* The sections after the scheduled providers — Not scheduled, then
+   System — each open with a group line naming them; system jobs carry a
+   gear by the name. */
+.plan-table tr.plan-group td {
   padding-top: 10px;
   padding-bottom: 10px;
   border-top: 1px solid var(--border-strong);
@@ -985,6 +986,8 @@ code {
   color: var(--text-muted);
 }
 .plan-group-note { margin-left: 10px; }
+.tl-tag.tl-tag-neutral { background: var(--surface-raised); color: var(--text-muted); }
+.plan-add { height: 28px; padding: 0 10px; font-size: 12px; white-space: nowrap; text-decoration: none; margin-right: 5px; }
 .sys-icon { margin-right: 8px; color: var(--pill-cleanup); }
 
 /* Under the table: the summary and the legend. */

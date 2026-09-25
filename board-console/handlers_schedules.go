@@ -203,6 +203,9 @@ type schedulesPageData struct {
 	Capacity int
 	// System is Board Console's own daily jobs, listed after the providers.
 	System []systemRow
+	// Unscheduled is the added providers without a schedule, listed between
+	// the scheduled ones and System.
+	Unscheduled []unscheduledRow
 
 	// Timeline is the plan's load strip, as JSON for app.js to draw in the
 	// viewer's timezone (see timelineData).
@@ -278,6 +281,18 @@ func buildSchedulesPageData(app *App, r *http.Request) schedulesPageData {
 	}
 	sort.Strings(knownProviders)
 
+	scheduled := map[string]bool{}
+	for _, sch := range schedules {
+		scheduled[sch.Provider] = true
+	}
+	var unscheduled []unscheduledRow
+	for _, p := range knownProviders {
+		if scheduled[p] {
+			continue
+		}
+		unscheduled = append(unscheduled, newUnscheduledRow(p, latest[p], app.runner.Crawling(p), crawls[p], now))
+	}
+
 	return schedulesPageData{
 		Active:        "schedules",
 		Schedules:     rows,
@@ -290,7 +305,42 @@ func buildSchedulesPageData(app *App, r *http.Request) schedulesPageData {
 		Capacity: scheduleCapacity(),
 		Timeline: buildTimeline(schedules, scheduleCapacity()),
 		System:   buildSystemRows(app.system.List(), systemJobs, now),
+
+		Unscheduled: unscheduled,
 	}
+}
+
+// unscheduledRow is an added provider with no schedule, listed on the
+// Schedules plan so the page covers the whole fleet: its last crawl, and
+// the crawls started by hand as squares on the day.
+type unscheduledRow struct {
+	Provider string
+	Last     lastCrawlView
+	Crawling bool
+	// Runs is its crawls of the last 24 hours as slotRun JSON, each at the
+	// minute it started; app.js keeps the ones of the viewer's today.
+	Runs string
+}
+
+func newUnscheduledRow(provider string, latest *Run, crawling bool, crawls []*Job, now time.Time) unscheduledRow {
+	// The same last-crawl rule the scheduled rows use, with no schedule of
+	// its own to add to it.
+	row := unscheduledRow{Provider: provider, Crawling: crawling,
+		Last: scheduleRow{LatestRun: latest, Crawling: crawling}.LastCrawl()}
+	runs := []slotRun{}
+	for _, j := range crawls {
+		if j.StartedAt.Before(now.Add(-24 * time.Hour)) {
+			continue
+		}
+		at := j.StartedAt.UTC()
+		slot := slotRun{Min: at.Hour()*60 + at.Minute()}
+		slot.fill(j)
+		runs = append(runs, slot)
+	}
+	if b, err := json.Marshal(runs); err == nil {
+		row.Runs = string(b)
+	}
+	return row
 }
 
 // systemRow is one system job on the Schedules plan.
